@@ -1,0 +1,10 @@
+[package]
+name = "bridge"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitcoin = "0.32"
+bitcoin-scriptexec = { git = "https://github.com/BitVM/rust-bitcoin-scriptexec" }
+lamport = { path = "../lamport" }
+rand = "0.8"
