@@ -21,15 +21,62 @@ mod flow_tests {
     use crate::scripts;
     use super::{cancel, deposit, disprove, fanout, kickoff, request, withdraw};
 
+    // Helper: create depositor with funded UTXO
+    fn setup_depositor(secp: &Secp256k1<bitcoin::secp256k1::All>, params: &Params) -> (Depositor, Committee, StdRng) {
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut depositor = Depositor::new(&mut rng, secp, 0, OutPoint::new(Txid::all_zeros(), 0));
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(secp, depositor.pubkey, params.deposit_size);
+        let committee = Committee::new(&mut rng, secp);
+        (depositor, committee, rng)
+    }
+
+    // Helper: build signed request_tx and confirm it
+    fn build_and_confirm_request(
+        secp: &Secp256k1<bitcoin::secp256k1::All>,
+        depositor: &Depositor,
+        committee: &Committee,
+        params: &Params,
+    ) -> bitcoin::Transaction {
+        let mut request_tx = request::build_request_tx(secp, depositor, committee, params).unwrap();
+        let depositor_prevout = TxOut {
+            value: params.deposit_size,
+            script_pubkey: Address::p2tr(secp, depositor.pubkey, None, Network::Bitcoin).script_pubkey(),
+        };
+        request::sign_request_tx(secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        request_tx
+    }
+
+    // Helper: create operator with funded UTXO, build+sign+confirm fanout tree
+    fn setup_operator_with_fanout(
+        secp: &Secp256k1<bitcoin::secp256k1::All>,
+        rng: &mut StdRng,
+        params: &Params,
+    ) -> (Operator, fanout::FanoutTree) {
+        let mut operator = Operator::new(rng, secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(secp, operator.pubkey, params.fanout_init_value());
+
+        let mut tree = fanout::build_fanout_tree(secp, &operator, params).unwrap();
+        let init_txout = TxOut {
+            value: params.fanout_init_value(),
+            script_pubkey: Address::p2tr(secp, operator.pubkey, None, Network::Bitcoin).script_pubkey(),
+        };
+        fanout::sign_fanout_tree(secp, &mut tree, &operator.keypair, &init_txout, params).unwrap();
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.confirm_tx(tx);
+            }
+        }
+        (operator, tree)
+    }
+
     #[test]
     fn test_request_to_deposit_flow() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        let committee = Committee::new(&mut rng, &secp);
+        let (depositor, committee, _) = setup_depositor(&secp, &params);
 
-        let request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let request_tx = build_and_confirm_request(&secp, &depositor, &committee, &params);
         let request_txid = request_tx.compute_txid();
 
         let request_spend_info = scripts::request_spend_info(
@@ -50,12 +97,11 @@ mod flow_tests {
     #[test]
     fn test_request_to_cancel_flow() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        let committee = Committee::new(&mut rng, &secp);
+        let (depositor, committee, _) = setup_depositor(&secp, &params);
 
-        let request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let request_tx = build_and_confirm_request(&secp, &depositor, &committee, &params);
+        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64);
         let request_txid = request_tx.compute_txid();
 
         let request_spend_info = scripts::request_spend_info(
@@ -81,16 +127,8 @@ mod flow_tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let init_utxo = OutPoint::new(Txid::all_zeros(), 0);
-        let operator = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
 
-        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
-        let init_txout = TxOut {
-            value: params.dust_amount,
-            script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
-        };
-        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+        let (operator, tree) = setup_operator_with_fanout(&secp, &mut rng, &params);
 
         let slot = 0;
         let disprove_hash = [0xaa; 20];
@@ -98,14 +136,7 @@ mod flow_tests {
             &secp, &operator, slot, &tree, disprove_hash, &params,
         ).unwrap();
 
-        let prevouts: Vec<TxOut> = (0..params.lamport_chunks_per_slot)
-            .map(|chunk| {
-                let leaf_level = &tree.levels[tree.levels.len() - 1];
-                let tx_index = slot / params.fanout_branching;
-                let output_index = (slot % params.fanout_branching) * params.lamport_chunks_per_slot + chunk;
-                leaf_level[tx_index].output[output_index].clone()
-            })
-            .collect();
+        let prevouts = tree.kickoff_prevouts(&params, slot);
 
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
@@ -124,15 +155,11 @@ mod flow_tests {
     #[test]
     fn test_deposit_kickoff_to_withdraw_flow() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        let committee = Committee::new(&mut rng, &secp);
-        let init_utxo = OutPoint::new(Txid::all_zeros(), 1);
-        let operator = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
+        let (depositor, committee, mut rng) = setup_depositor(&secp, &params);
 
         // Build request → deposit chain
-        let request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let request_tx = build_and_confirm_request(&secp, &depositor, &committee, &params);
         let request_txid = request_tx.compute_txid();
         let request_spend_info = scripts::request_spend_info(
             &secp, committee.pubkey, depositor.pubkey,
@@ -143,15 +170,10 @@ mod flow_tests {
             &secp, &mut deposit_tx, &committee.keypair,
             &request_spend_info, &[request_tx.output[0].clone()],
         ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&deposit_tx);
 
         // Build fanout → kickoff chain
-        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
-        let init_txout = TxOut {
-            value: params.dust_amount,
-            script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
-        };
-        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+        let (operator, tree) = setup_operator_with_fanout(&secp, &mut rng, &params);
 
         let slot = 0;
         let disprove_secret = [0xab; 20];
@@ -159,14 +181,7 @@ mod flow_tests {
         let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, disprove_hash, &params,
         ).unwrap();
-        let kickoff_prevouts: Vec<TxOut> = (0..params.lamport_chunks_per_slot)
-            .map(|chunk| {
-                let leaf_level = &tree.levels[tree.levels.len() - 1];
-                let tx_index = slot / params.fanout_branching;
-                let output_index = (slot % params.fanout_branching) * params.lamport_chunks_per_slot + chunk;
-                leaf_level[tx_index].output[output_index].clone()
-            })
-            .collect();
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
         let lamport_pk = operator.lamport_pubkey(slot);
@@ -174,6 +189,8 @@ mod flow_tests {
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
 
         // Build withdraw tx chaining deposit + kickoff
         let deposit_txid = deposit_tx.compute_txid();
@@ -208,17 +225,26 @@ mod flow_tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let init_utxo = OutPoint::new(Txid::all_zeros(), 0);
-        let operator = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
 
-        let tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+        let (operator, tree) = setup_operator_with_fanout(&secp, &mut rng, &params);
+
         let slot = 0;
         let disprove_secret = [0xab; 20];
         let disprove_hash = hash160::Hash::hash(&disprove_secret).to_byte_array();
 
-        let kickoff_tx = kickoff::build_kickoff_tx(
+        let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, disprove_hash, &params,
         ).unwrap();
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let msg = [0xbb; lamport::MSG_LEN];
+        let lamport_sig = operator.lamport_keys[slot].sign(&msg);
+        let lamport_pk = operator.lamport_pubkey(slot);
+        kickoff::sign_kickoff_tx(
+            &secp, &mut kickoff_tx, &operator.keypair,
+            &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
+        ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+
         let kickoff_txid = kickoff_tx.compute_txid();
 
         let connector_info = scripts::connector_spend_info(
@@ -237,14 +263,12 @@ mod flow_tests {
     #[test]
     fn test_non_committee_cannot_spend_deposit_output() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        let committee = Committee::new(&mut rng, &secp);
+        let (depositor, committee, mut rng) = setup_depositor(&secp, &params);
         let attacker = Committee::new(&mut rng, &secp);
 
-        // Build real deposit tx
-        let request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        // Build request → deposit chain
+        let request_tx = build_and_confirm_request(&secp, &depositor, &committee, &params);
         let request_txid = request_tx.compute_txid();
         let request_spend_info = scripts::request_spend_info(
             &secp, committee.pubkey, depositor.pubkey,
@@ -255,6 +279,7 @@ mod flow_tests {
             &secp, &mut deposit_tx, &committee.keypair,
             &request_spend_info, &[request_tx.output[0].clone()],
         ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&deposit_tx);
 
         // Try to spend deposit output with attacker's key
         let init_utxo = OutPoint::new(Txid::all_zeros(), 1);

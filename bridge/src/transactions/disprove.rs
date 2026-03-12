@@ -11,7 +11,8 @@ use crate::BridgeError;
 /// - Input: kickoffTx.out[0] (connector), script-path with hash preimage (no sig)
 /// - Output: OP_RETURN (burns the connector)
 pub fn build_disprove_tx(kickoff_txid: Txid) -> Transaction {
-    let op_return = ScriptBuf::new_op_return(&[]);
+    // Pad OP_RETURN to meet MIN_STANDARD_TX_NONWITNESS_SIZE (65 bytes).
+    let op_return = ScriptBuf::new_op_return(&[0u8; 4]);
 
     Transaction {
         version: Version::TWO,
@@ -54,26 +55,9 @@ pub fn witness_disprove_tx(
 mod tests {
     use super::*;
     use bitcoin::hashes::{hash160, Hash};
-    use bitcoin::key::{Keypair, UntweakedPublicKey as XOnlyPublicKey};
-    use bitcoin::secp256k1::{Secp256k1, SecretKey};
-    use bitcoin::blockdata::transaction::Sequence;
+    use bitcoin::secp256k1::Secp256k1;
     use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
-
-    fn random_keypair(
-        rng: &mut impl Rng,
-        secp: &Secp256k1<bitcoin::secp256k1::All>,
-    ) -> (Keypair, XOnlyPublicKey) {
-        let mut bytes = [0u8; 32];
-        loop {
-            rng.fill(&mut bytes);
-            if let Ok(sk) = SecretKey::from_slice(&bytes) {
-                let kp = Keypair::from_secret_key(secp, &sk);
-                let (pk, _) = kp.x_only_public_key();
-                return (kp, pk);
-            }
-        }
-    }
+    use rand::SeedableRng;
 
     #[test]
     fn test_build_disprove_tx() {
@@ -92,29 +76,58 @@ mod tests {
     fn test_witness_disprove_tx() {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
-        let (_, operator_pk) = random_keypair(&mut rng, &secp);
+        let params = crate::params::Params::test_defaults();
 
+        use crate::actor::Operator;
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::{fanout, kickoff};
+
+        let mut operator = Operator::new(&mut rng, &secp, bitcoin::OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+
+        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+        let init_txout = TxOut {
+            value: params.fanout_init_value(),
+            script_pubkey: bitcoin::Address::p2tr(&secp, operator.pubkey, None, bitcoin::Network::Bitcoin)
+                .script_pubkey(),
+        };
+        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.confirm_tx(tx);
+            }
+        }
+
+        let slot = 0;
         let secret = [0xab; 20];
         let secret_hash = hash160::Hash::hash(&secret).to_byte_array();
-        let timeout = Sequence::from_height(10);
 
+        let mut kickoff_tx = kickoff::build_kickoff_tx(
+            &secp, &operator, slot, &tree, secret_hash, &params,
+        ).unwrap();
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let msg = [0xbb; lamport::MSG_LEN];
+        let lamport_sig = operator.lamport_keys[slot].sign(&msg);
+        let lamport_pk = operator.lamport_pubkey(slot);
+        kickoff::sign_kickoff_tx(
+            &secp, &mut kickoff_tx, &operator.keypair,
+            &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
+        ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+
+        let kickoff_txid = kickoff_tx.compute_txid();
+        let timeout = params.kickoff_timeout;
         let spend_info = scripts::connector_spend_info(
-            &secp, operator_pk, secret_hash, timeout,
+            &secp, operator.pubkey, secret_hash, timeout,
         ).unwrap();
 
-        let kickoff_txid = Txid::all_zeros();
         let mut tx = build_disprove_tx(kickoff_txid);
         witness_disprove_tx(&mut tx, secret, secret_hash, &spend_info).unwrap();
 
-        // Witness: preimage + script + control block
         assert_eq!(tx.input[0].witness.len(), 3);
         assert_eq!(tx.input[0].witness[0], secret);
 
-        use crate::network::BITCOIN_NETWORK;
-        let connector_prevout = TxOut {
-            value: Amount::from_sat(546),
-            script_pubkey: ScriptBuf::new_p2tr_tweaked(spend_info.output_key()),
-        };
+        let connector_prevout = kickoff_tx.output[0].clone();
         BITCOIN_NETWORK
             .verify_input(&tx, 0, &[connector_prevout])
             .unwrap();
@@ -124,28 +137,58 @@ mod tests {
     fn test_disprove_wrong_preimage_rejected() {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
-        let (_, operator_pk) = random_keypair(&mut rng, &secp);
+        let params = crate::params::Params::test_defaults();
 
+        use crate::actor::Operator;
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::{fanout, kickoff};
+
+        let mut operator = Operator::new(&mut rng, &secp, bitcoin::OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+
+        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+        let init_txout = TxOut {
+            value: params.fanout_init_value(),
+            script_pubkey: bitcoin::Address::p2tr(&secp, operator.pubkey, None, bitcoin::Network::Bitcoin)
+                .script_pubkey(),
+        };
+        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.confirm_tx(tx);
+            }
+        }
+
+        let slot = 0;
         let secret = [0xab; 20];
         let secret_hash = hash160::Hash::hash(&secret).to_byte_array();
-        let timeout = Sequence::from_height(10);
 
+        let mut kickoff_tx = kickoff::build_kickoff_tx(
+            &secp, &operator, slot, &tree, secret_hash, &params,
+        ).unwrap();
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let msg = [0xbb; lamport::MSG_LEN];
+        let lamport_sig = operator.lamport_keys[slot].sign(&msg);
+        let lamport_pk = operator.lamport_pubkey(slot);
+        kickoff::sign_kickoff_tx(
+            &secp, &mut kickoff_tx, &operator.keypair,
+            &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
+        ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+
+        let kickoff_txid = kickoff_tx.compute_txid();
+        let timeout = params.kickoff_timeout;
         let spend_info = scripts::connector_spend_info(
-            &secp, operator_pk, secret_hash, timeout,
+            &secp, operator.pubkey, secret_hash, timeout,
         ).unwrap();
 
-        let kickoff_txid = Txid::all_zeros();
         let mut tx = build_disprove_tx(kickoff_txid);
 
         // Use wrong preimage
         let wrong_secret = [0xcc; 20];
         witness_disprove_tx(&mut tx, wrong_secret, secret_hash, &spend_info).unwrap();
 
-        use crate::network::BITCOIN_NETWORK;
-        let connector_prevout = TxOut {
-            value: Amount::from_sat(546),
-            script_pubkey: ScriptBuf::new_p2tr_tweaked(spend_info.output_key()),
-        };
+        let connector_prevout = kickoff_tx.output[0].clone();
         assert!(
             BITCOIN_NETWORK.verify_input(&tx, 0, &[connector_prevout]).is_err(),
             "wrong hash preimage should be rejected"

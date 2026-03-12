@@ -2,6 +2,8 @@ pub mod actor;
 pub mod engine;
 pub mod network;
 pub mod params;
+#[cfg(feature = "regtest")]
+pub mod regtest;
 pub mod scripts;
 pub mod transactions;
 
@@ -19,6 +21,8 @@ pub enum BridgeError {
     Signing(String),
     MissingUtxo(&'static str),
     ScriptExecution(String),
+    #[cfg(feature = "regtest")]
+    Regtest(String),
 }
 
 impl fmt::Display for BridgeError {
@@ -32,6 +36,8 @@ impl fmt::Display for BridgeError {
             Self::Signing(msg) => write!(f, "signing: {msg}"),
             Self::MissingUtxo(name) => write!(f, "missing utxo: {name}"),
             Self::ScriptExecution(msg) => write!(f, "script execution: {msg}"),
+            #[cfg(feature = "regtest")]
+            Self::Regtest(msg) => write!(f, "regtest: {msg}"),
         }
     }
 }

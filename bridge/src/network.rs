@@ -9,12 +9,22 @@ use crate::BridgeError;
 
 pub enum BitcoinNetworkMode {
     ScriptExec,
+    #[cfg(feature = "regtest")]
+    Regtest,
 }
 
 pub struct BitcoinNetwork {
     mode: BitcoinNetworkMode,
     secp: Secp256k1<All>,
 }
+
+#[cfg(all(test, feature = "regtest"))]
+pub(crate) static REGTEST_NODE: std::sync::LazyLock<crate::regtest::RegtestNode> =
+    std::sync::LazyLock::new(|| {
+        let node = crate::regtest::RegtestNode::start().expect("start regtest node");
+        node.mine_blocks(101).expect("mine for coinbase maturity");
+        node
+    });
 
 impl BitcoinNetwork {
     pub fn new(mode: BitcoinNetworkMode) -> Self {
@@ -33,7 +43,11 @@ impl BitcoinNetwork {
     ) -> Result<(), BridgeError> {
         match &self.mode {
             BitcoinNetworkMode::ScriptExec => {
-                self.verify_input_impl(tx, input_index, prevouts)
+                self.verify_input_scriptexec(tx, input_index, prevouts)
+            }
+            #[cfg(feature = "regtest")]
+            BitcoinNetworkMode::Regtest => {
+                self.verify_input_regtest(tx, input_index, prevouts)
             }
         }
     }
@@ -46,7 +60,102 @@ impl BitcoinNetwork {
         Ok(())
     }
 
-    fn verify_input_impl(
+    /// Fund a P2TR address. ScriptExec: dummy outpoint. Regtest: real funded UTXO.
+    #[cfg(test)]
+    pub(crate) fn fund_p2tr(
+        &self,
+        secp: &Secp256k1<All>,
+        pubkey: bitcoin::key::UntweakedPublicKey,
+        amount: bitcoin::Amount,
+    ) -> bitcoin::OutPoint {
+        match &self.mode {
+            BitcoinNetworkMode::ScriptExec => {
+                let _ = (secp, pubkey, amount);
+                bitcoin::OutPoint::new(bitcoin::Txid::all_zeros(), 0)
+            }
+            #[cfg(feature = "regtest")]
+            BitcoinNetworkMode::Regtest => {
+                let addr = bitcoin::Address::p2tr(secp, pubkey, None, bitcoin::Network::Regtest);
+                REGTEST_NODE.fund_address(&addr, amount).expect("fund_p2tr")
+            }
+        }
+    }
+
+    /// Broadcast tx and mine 1 block. ScriptExec: no-op. Regtest: real broadcast.
+    #[cfg(test)]
+    pub(crate) fn confirm_tx(&self, tx: &Transaction) {
+        match &self.mode {
+            BitcoinNetworkMode::ScriptExec => { let _ = tx; }
+            #[cfg(feature = "regtest")]
+            BitcoinNetworkMode::Regtest => {
+                use bitcoincore_rpc::RpcApi;
+                let txid = tx.compute_txid();
+                // Use get_raw_transaction (not _info) to avoid JSON parsing issues
+                // with P2A outputs that bitcoincore-rpc 0.19 doesn't understand.
+                match REGTEST_NODE.client.get_raw_transaction(&txid, None) {
+                    Ok(_) => {
+                        // Tx is known. If still in mempool, mine to confirm.
+                        if REGTEST_NODE.client.get_mempool_entry(&txid).is_ok() {
+                            REGTEST_NODE.mine_blocks(1).expect("confirm_tx: mine");
+                        }
+                    }
+                    Err(_) => {
+                        REGTEST_NODE.send_transaction(tx).unwrap_or_else(|e| panic!("confirm_tx: send {txid}: {e}"));
+                        REGTEST_NODE.mine_blocks(1).expect("confirm_tx: mine");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Mine n blocks. ScriptExec: no-op. Regtest: real mining.
+    #[cfg(test)]
+    pub(crate) fn mine_blocks(&self, n: u64) {
+        match &self.mode {
+            BitcoinNetworkMode::ScriptExec => { let _ = n; }
+            #[cfg(feature = "regtest")]
+            BitcoinNetworkMode::Regtest => {
+                REGTEST_NODE.mine_blocks(n).expect("mine_blocks");
+            }
+        }
+    }
+
+    #[cfg(feature = "regtest")]
+    fn verify_input_regtest(
+        &self,
+        tx: &Transaction,
+        _input_index: usize,
+        _prevouts: &[TxOut],
+    ) -> Result<(), BridgeError> {
+        #[cfg(test)]
+        {
+            use bitcoincore_rpc::RpcApi;
+            // Already confirmed or in mempool? Skip.
+            // Use get_raw_transaction (not _info) to avoid JSON parsing issues
+            // with P2A outputs that bitcoincore-rpc 0.19 doesn't understand.
+            let txid = tx.compute_txid();
+            if REGTEST_NODE.client.get_raw_transaction(&txid, None).is_ok() {
+                return Ok(());
+            }
+            // Validate via testmempoolaccept
+            let (accepted, reason) = REGTEST_NODE.test_mempool_accept(tx)?;
+            if !accepted {
+                let reason = reason.unwrap_or_else(|| "unknown".into());
+                return Err(BridgeError::Regtest(format!("testmempoolaccept rejected: {reason}")));
+            }
+            // Broadcast + mine
+            REGTEST_NODE.send_transaction(tx)?;
+            REGTEST_NODE.mine_blocks(1)?;
+            Ok(())
+        }
+        #[cfg(not(test))]
+        {
+            let _ = tx;
+            Err(BridgeError::Regtest("regtest verify only available in tests".into()))
+        }
+    }
+
+    fn verify_input_scriptexec(
         &self,
         tx: &Transaction,
         input_index: usize,
@@ -183,5 +292,9 @@ impl BitcoinNetwork {
 }
 
 #[cfg(test)]
-pub(crate) static BITCOIN_NETWORK: std::sync::LazyLock<BitcoinNetwork> =
-    std::sync::LazyLock::new(|| BitcoinNetwork::new(BitcoinNetworkMode::ScriptExec));
+pub(crate) static BITCOIN_NETWORK: std::sync::LazyLock<BitcoinNetwork> = std::sync::LazyLock::new(|| {
+    #[cfg(feature = "regtest")]
+    { BitcoinNetwork::new(BitcoinNetworkMode::Regtest) }
+    #[cfg(not(feature = "regtest"))]
+    { BitcoinNetwork::new(BitcoinNetworkMode::ScriptExec) }
+});

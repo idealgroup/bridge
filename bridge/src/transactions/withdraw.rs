@@ -6,7 +6,7 @@ use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::taproot::{LeafVersion, TapLeafHash, TaprootSpendInfo};
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
-use bitcoin::{Address, Amount, Network, ScriptBuf, Txid, Witness};
+use bitcoin::{Address, Network, ScriptBuf, Txid, Witness};
 
 use crate::actor::Operator;
 use crate::params::Params;
@@ -18,7 +18,7 @@ use crate::BridgeError;
 /// - Input 0: depositTx.out[0], key-spend presigned by committee
 /// - Input 1: kickoffTx.out[0] (connector), script-path operator sig + CSV
 /// - Output 0: DEPOSIT_SIZE to operator
-/// - Output 1: P2A anchor (0 sats)
+/// - Output 1: P2A anchor (240 sats)
 pub fn build_withdraw_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     deposit_txid: Txid,
@@ -52,10 +52,10 @@ pub fn build_withdraw_tx(
                 value: params.deposit_size,
                 script_pubkey: operator_address.script_pubkey(),
             },
-            // P2A anchor
+            // P2A anchor for CPFP fee bumping
             TxOut {
-                value: Amount::ZERO,
-                script_pubkey: ScriptBuf::new_op_return(&[]),
+                value: scripts::P2A_DUST,
+                script_pubkey: scripts::p2a_script(),
             },
         ],
     })
@@ -167,40 +167,97 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let operator = Operator::new(
-            &mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count,
-        );
+
+        use crate::actor::Depositor;
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::{deposit, fanout, kickoff, request};
+
+        // Fund depositor
+        let request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, {
+            let dep_tmp = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
+            dep_tmp.pubkey
+        }, params.deposit_size);
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let depositor = Depositor::new(&mut rng, &secp, 0, request_utxo);
         let committee = Committee::new(&mut rng, &secp);
 
-        let deposit_txid = Txid::all_zeros();
-        let kickoff_txid = Txid::all_zeros();
+        // Fund operator, then update its init_utxo to the real outpoint
+        let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+
+        // Build request → deposit chain
+        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let depositor_prevout = TxOut {
+            value: params.deposit_size,
+            script_pubkey: Address::p2tr(&secp, depositor.pubkey, None, Network::Bitcoin).script_pubkey(),
+        };
+        request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&request_tx);
+
+        let request_txid = request_tx.compute_txid();
+        let request_spend_info = scripts::request_spend_info(
+            &secp, committee.pubkey, depositor.pubkey,
+            depositor.deposit_secret_hash(), params.deposit_timeout,
+        ).unwrap();
+        let mut deposit_tx = deposit::build_deposit_tx(&secp, request_txid, &committee, &params).unwrap();
+        deposit::presign_deposit_tx(
+            &secp, &mut deposit_tx, &committee.keypair,
+            &request_spend_info, &[request_tx.output[0].clone()],
+        ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&deposit_tx);
+
+        // Build fanout → kickoff chain
+        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+        let init_txout = TxOut {
+            value: params.fanout_init_value(),
+            script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin).script_pubkey(),
+        };
+        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.confirm_tx(tx);
+            }
+        }
+
+        let slot = 0;
+        let disprove_hash = [0xaa; 20];
+        let mut kickoff_tx = kickoff::build_kickoff_tx(
+            &secp, &operator, slot, &tree, disprove_hash, &params,
+        ).unwrap();
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let msg = [0xbb; lamport::MSG_LEN];
+        let lamport_sig = operator.lamport_keys[slot].sign(&msg);
+        let lamport_pk = operator.lamport_pubkey(slot);
+        kickoff::sign_kickoff_tx(
+            &secp, &mut kickoff_tx, &operator.keypair,
+            &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
+        ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
+
+        // Build withdraw tx
+        let deposit_txid = deposit_tx.compute_txid();
+        let kickoff_txid = kickoff_tx.compute_txid();
         let mut tx = build_withdraw_tx(
             &secp, deposit_txid, kickoff_txid, &operator, &params,
         ).unwrap();
 
-        // Deposit output is committee P2TR key-spend (no script tree)
-        let deposit_prevout = TxOut {
-            value: params.deposit_size,
-            script_pubkey: Address::p2tr(&secp, committee.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
-        };
-        // Connector output (placeholder for prevouts array)
-        let disprove_hash = [0xaa; 20];
-        let connector_info = scripts::connector_spend_info(
-            &secp, operator.pubkey, disprove_hash, params.kickoff_timeout,
-        ).unwrap();
-        let connector_prevout = TxOut {
-            value: params.dust_amount,
-            script_pubkey: ScriptBuf::new_p2tr_tweaked(connector_info.output_key()),
-        };
-
-        let prevouts = [deposit_prevout, connector_prevout];
+        let prevouts = vec![deposit_tx.output[0].clone(), kickoff_tx.output[0].clone()];
         presign_withdraw_input0(&secp, &mut tx, &committee.keypair, &prevouts).unwrap();
 
         assert_eq!(tx.input[0].witness.len(), 1);
         assert_eq!(tx.input[0].witness[0].len(), 64);
 
-        use crate::network::BITCOIN_NETWORK;
+        // Also sign input 1 so the full tx is valid for regtest
+        let connector_info = scripts::connector_spend_info(
+            &secp, operator.pubkey, disprove_hash, params.kickoff_timeout,
+        ).unwrap();
+        sign_withdraw_input1(
+            &secp, &mut tx, &operator.keypair,
+            &connector_info, operator.pubkey, params.kickoff_timeout, &prevouts,
+        ).unwrap();
+
         BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).unwrap();
     }
 
@@ -209,43 +266,100 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let operator = Operator::new(
-            &mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count,
-        );
+
+        use crate::actor::Depositor;
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::{deposit, fanout, kickoff, request};
+
+        // Fund depositor
+        let request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, {
+            let dep_tmp = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
+            dep_tmp.pubkey
+        }, params.deposit_size);
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let depositor = Depositor::new(&mut rng, &secp, 0, request_utxo);
         let committee = Committee::new(&mut rng, &secp);
 
+        // Fund operator, then update its init_utxo to the real outpoint
+        let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+
+        // Build request → deposit chain
+        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let depositor_prevout = TxOut {
+            value: params.deposit_size,
+            script_pubkey: Address::p2tr(&secp, depositor.pubkey, None, Network::Bitcoin).script_pubkey(),
+        };
+        request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&request_tx);
+
+        let request_txid = request_tx.compute_txid();
+        let request_spend_info = scripts::request_spend_info(
+            &secp, committee.pubkey, depositor.pubkey,
+            depositor.deposit_secret_hash(), params.deposit_timeout,
+        ).unwrap();
+        let mut deposit_tx = deposit::build_deposit_tx(&secp, request_txid, &committee, &params).unwrap();
+        deposit::presign_deposit_tx(
+            &secp, &mut deposit_tx, &committee.keypair,
+            &request_spend_info, &[request_tx.output[0].clone()],
+        ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&deposit_tx);
+
+        // Build and confirm fanout tree
+        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+        let init_txout = TxOut {
+            value: params.fanout_init_value(),
+            script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin).script_pubkey(),
+        };
+        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.confirm_tx(tx);
+            }
+        }
+
+        // Build and confirm kickoff
+        let slot = 0;
         let disprove_hash = hash160::Hash::hash(&[0xab; 20]).to_byte_array();
+        let mut kickoff_tx = kickoff::build_kickoff_tx(
+            &secp, &operator, slot, &tree, disprove_hash, &params,
+        ).unwrap();
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let msg = [0xbb; lamport::MSG_LEN];
+        let lamport_sig = operator.lamport_keys[slot].sign(&msg);
+        let lamport_pk = operator.lamport_pubkey(slot);
+        kickoff::sign_kickoff_tx(
+            &secp, &mut kickoff_tx, &operator.keypair,
+            &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
+        ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
+
         let connector_info = scripts::connector_spend_info(
             &secp, operator.pubkey, disprove_hash, params.kickoff_timeout,
         ).unwrap();
 
-        let deposit_txid = Txid::all_zeros();
-        let kickoff_txid = Txid::all_zeros();
+        // Build withdraw tx with both real parents
+        let deposit_txid = deposit_tx.compute_txid();
+        let kickoff_txid = kickoff_tx.compute_txid();
         let mut tx = build_withdraw_tx(
             &secp, deposit_txid, kickoff_txid, &operator, &params,
         ).unwrap();
 
-        let deposit_prevout = TxOut {
-            value: params.deposit_size,
-            script_pubkey: Address::p2tr(&secp, committee.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
-        };
-        let connector_prevout = TxOut {
-            value: params.dust_amount,
-            script_pubkey: ScriptBuf::new_p2tr_tweaked(connector_info.output_key()),
-        };
-        let prevouts = [deposit_prevout, connector_prevout];
+        let prevouts = vec![deposit_tx.output[0].clone(), kickoff_tx.output[0].clone()];
+
+        // Sign input 0 (committee) so full tx is valid for regtest
+        presign_withdraw_input0(&secp, &mut tx, &committee.keypair, &prevouts).unwrap();
 
         sign_withdraw_input1(
             &secp, &mut tx, &operator.keypair,
             &connector_info, operator.pubkey, params.kickoff_timeout, &prevouts,
         ).unwrap();
 
-        // Witness: sig + script + control_block
         assert_eq!(tx.input[1].witness.len(), 3);
         assert_eq!(tx.input[1].witness[0].len(), 64);
 
-        use crate::network::BITCOIN_NETWORK;
         BITCOIN_NETWORK.verify_input(&tx, 1, &prevouts).unwrap();
     }
 
@@ -254,37 +368,60 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let operator = Operator::new(
-            &mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count,
-        );
-        let committee = Committee::new(&mut rng, &secp);
 
-        // Create a different operator (wrong signer)
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::{fanout, kickoff};
+
+        let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        let committee = Committee::new(&mut rng, &secp);
         let wrong_operator = Operator::new(
             &mut rng, &secp, OutPoint::new(Txid::all_zeros(), 1), params.deposit_count,
         );
 
+        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+        let init_txout = TxOut {
+            value: params.fanout_init_value(),
+            script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin).script_pubkey(),
+        };
+        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.confirm_tx(tx);
+            }
+        }
+
+        let slot = 0;
         let disprove_hash = hash160::Hash::hash(&[0xab; 20]).to_byte_array();
+        let mut kickoff_tx = kickoff::build_kickoff_tx(
+            &secp, &operator, slot, &tree, disprove_hash, &params,
+        ).unwrap();
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let msg = [0xbb; lamport::MSG_LEN];
+        let lamport_sig = operator.lamport_keys[slot].sign(&msg);
+        let lamport_pk = operator.lamport_pubkey(slot);
+        kickoff::sign_kickoff_tx(
+            &secp, &mut kickoff_tx, &operator.keypair,
+            &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
+        ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
+
         let connector_info = scripts::connector_spend_info(
             &secp, operator.pubkey, disprove_hash, params.kickoff_timeout,
         ).unwrap();
 
         let deposit_txid = Txid::all_zeros();
-        let kickoff_txid = Txid::all_zeros();
+        let kickoff_txid = kickoff_tx.compute_txid();
         let mut tx = build_withdraw_tx(
             &secp, deposit_txid, kickoff_txid, &operator, &params,
         ).unwrap();
 
         let deposit_prevout = TxOut {
             value: params.deposit_size,
-            script_pubkey: Address::p2tr(&secp, committee.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
+            script_pubkey: Address::p2tr(&secp, committee.pubkey, None, Network::Bitcoin).script_pubkey(),
         };
-        let connector_prevout = TxOut {
-            value: params.dust_amount,
-            script_pubkey: ScriptBuf::new_p2tr_tweaked(connector_info.output_key()),
-        };
-        let prevouts = [deposit_prevout, connector_prevout];
+        let prevouts = [deposit_prevout, kickoff_tx.output[0].clone()];
 
         // Sign with wrong operator's key
         sign_withdraw_input1(
@@ -292,7 +429,6 @@ mod tests {
             &connector_info, operator.pubkey, params.kickoff_timeout, &prevouts,
         ).unwrap();
 
-        use crate::network::BITCOIN_NETWORK;
         assert!(
             BITCOIN_NETWORK.verify_input(&tx, 1, &prevouts).is_err(),
             "wrong operator key should be rejected"
@@ -304,18 +440,48 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let operator = Operator::new(
-            &mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count,
-        );
+
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::{fanout, kickoff};
+
+        let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
         let committee = Committee::new(&mut rng, &secp);
 
+        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+        let init_txout = TxOut {
+            value: params.fanout_init_value(),
+            script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin).script_pubkey(),
+        };
+        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.confirm_tx(tx);
+            }
+        }
+
+        let slot = 0;
         let disprove_hash = hash160::Hash::hash(&[0xab; 20]).to_byte_array();
+        let mut kickoff_tx = kickoff::build_kickoff_tx(
+            &secp, &operator, slot, &tree, disprove_hash, &params,
+        ).unwrap();
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let msg = [0xbb; lamport::MSG_LEN];
+        let lamport_sig = operator.lamport_keys[slot].sign(&msg);
+        let lamport_pk = operator.lamport_pubkey(slot);
+        kickoff::sign_kickoff_tx(
+            &secp, &mut kickoff_tx, &operator.keypair,
+            &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
+        ).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        // Do NOT mine extra blocks — CSV should fail
+
         let connector_info = scripts::connector_spend_info(
             &secp, operator.pubkey, disprove_hash, params.kickoff_timeout,
         ).unwrap();
 
         let deposit_txid = Txid::all_zeros();
-        let kickoff_txid = Txid::all_zeros();
+        let kickoff_txid = kickoff_tx.compute_txid();
         let mut tx = build_withdraw_tx(
             &secp, deposit_txid, kickoff_txid, &operator, &params,
         ).unwrap();
@@ -325,21 +491,15 @@ mod tests {
 
         let deposit_prevout = TxOut {
             value: params.deposit_size,
-            script_pubkey: Address::p2tr(&secp, committee.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
+            script_pubkey: Address::p2tr(&secp, committee.pubkey, None, Network::Bitcoin).script_pubkey(),
         };
-        let connector_prevout = TxOut {
-            value: params.dust_amount,
-            script_pubkey: ScriptBuf::new_p2tr_tweaked(connector_info.output_key()),
-        };
-        let prevouts = [deposit_prevout, connector_prevout];
+        let prevouts = [deposit_prevout, kickoff_tx.output[0].clone()];
 
         sign_withdraw_input1(
             &secp, &mut tx, &operator.keypair,
             &connector_info, operator.pubkey, params.kickoff_timeout, &prevouts,
         ).unwrap();
 
-        use crate::network::BITCOIN_NETWORK;
         assert!(
             BITCOIN_NETWORK.verify_input(&tx, 1, &prevouts).is_err(),
             "CSV with insufficient sequence should be rejected"

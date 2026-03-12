@@ -5,7 +5,7 @@ use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::taproot::LeafVersion;
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
-use bitcoin::{Amount, ScriptBuf, Witness};
+use bitcoin::{ScriptBuf, Witness};
 
 use crate::actor::Operator;
 use crate::params::Params;
@@ -58,10 +58,10 @@ pub fn build_kickoff_tx(
         script_pubkey: ScriptBuf::new_p2tr_tweaked(connector_info.output_key()),
     };
 
-    // Output 1: P2A anchor (OP_TRUE for CPFP fee bumping)
+    // Output 1: P2A anchor for CPFP fee bumping
     let anchor_output = TxOut {
-        value: Amount::ZERO,
-        script_pubkey: ScriptBuf::new_op_return(&[]),
+        value: scripts::P2A_DUST,
+        script_pubkey: scripts::p2a_script(),
     };
 
     Ok(Transaction {
@@ -167,45 +167,50 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let init_utxo = OutPoint::new(Txid::all_zeros(), 0);
-        let operator = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
-        let tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+
+        use crate::network::BITCOIN_NETWORK;
+
+        let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+
+        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+        let init_txout = TxOut {
+            value: params.fanout_init_value(),
+            script_pubkey: bitcoin::Address::p2tr(&secp, operator.pubkey, None, bitcoin::Network::Bitcoin)
+                .script_pubkey(),
+        };
+        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+
+        // Confirm fanout tree
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.confirm_tx(tx);
+            }
+        }
 
         let slot = 0;
         let disprove_hash = [0xaa; 20];
         let mut tx = build_kickoff_tx(&secp, &operator, slot, &tree, disprove_hash, &params).unwrap();
 
-        // Sign a test message with the lamport key
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
         let lamport_pk = operator.lamport_pubkey(slot);
 
-        // Build prevouts for the 3 inputs (fanout leaf outputs)
-        let prevouts: Vec<TxOut> = (0..params.lamport_chunks_per_slot)
-            .map(|chunk| {
-                let leaf_level = &tree.levels[tree.levels.len() - 1];
-                let tx_index = slot / params.fanout_branching;
-                let output_index = (slot % params.fanout_branching) * params.lamport_chunks_per_slot + chunk;
-                leaf_level[tx_index].output[output_index].clone()
-            })
-            .collect();
+        let prevouts = tree.kickoff_prevouts(&params, slot);
 
         sign_kickoff_tx(
             &secp, &mut tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &prevouts, &params,
         ).unwrap();
 
-        // Each of the 3 inputs should have witness: lamport preimages + sig + script + control_block
         for chunk in 0..params.lamport_chunks_per_slot {
             let (start, end) = params.lamport_chunk_range(chunk);
-            let expected_len = (end - start) + 3; // preimages + sig + script + cb
+            let expected_len = (end - start) + 3;
             assert_eq!(tx.input[chunk].witness.len(), expected_len);
-            // Sig is the element right before script and control_block
             let sig_idx = expected_len - 3;
             assert_eq!(tx.input[chunk].witness[sig_idx].len(), 64);
         }
 
-        use crate::network::BITCOIN_NETWORK;
         for i in 0..params.lamport_chunks_per_slot {
             BITCOIN_NETWORK.verify_input(&tx, i, &prevouts).unwrap();
         }
@@ -229,9 +234,25 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let init_utxo = OutPoint::new(Txid::all_zeros(), 0);
-        let operator = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
-        let tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+
+        use crate::network::BITCOIN_NETWORK;
+
+        let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+
+        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+        let init_txout = TxOut {
+            value: params.fanout_init_value(),
+            script_pubkey: bitcoin::Address::p2tr(&secp, operator.pubkey, None, bitcoin::Network::Bitcoin)
+                .script_pubkey(),
+        };
+        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.confirm_tx(tx);
+            }
+        }
 
         let slot = 0;
         let disprove_hash = [0xaa; 20];
@@ -242,21 +263,13 @@ mod tests {
         let wrong_lamport_sig = operator.lamport_keys[1].sign(&msg);
         let correct_lamport_pk = operator.lamport_pubkey(slot);
 
-        let prevouts: Vec<TxOut> = (0..params.lamport_chunks_per_slot)
-            .map(|chunk| {
-                let leaf_level = &tree.levels[tree.levels.len() - 1];
-                let tx_index = slot / params.fanout_branching;
-                let output_index = (slot % params.fanout_branching) * params.lamport_chunks_per_slot + chunk;
-                leaf_level[tx_index].output[output_index].clone()
-            })
-            .collect();
+        let prevouts = tree.kickoff_prevouts(&params, slot);
 
         sign_kickoff_tx(
             &secp, &mut tx, &operator.keypair,
             &wrong_lamport_sig, &correct_lamport_pk, &prevouts, &params,
         ).unwrap();
 
-        use crate::network::BITCOIN_NETWORK;
         let mut any_failed = false;
         for i in 0..params.lamport_chunks_per_slot {
             if BITCOIN_NETWORK.verify_input(&tx, i, &prevouts).is_err() {

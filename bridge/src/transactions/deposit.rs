@@ -91,10 +91,23 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let depositor = Depositor::new(
-            &mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0),
-        );
+
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::request;
+
+        let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size);
         let committee = Committee::new(&mut rng, &secp);
+
+        // Build and confirm request_tx (parent of deposit)
+        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let depositor_prevout = TxOut {
+            value: params.deposit_size,
+            script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
+                .script_pubkey(),
+        };
+        request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&request_tx);
 
         let request_spend_info = scripts::request_spend_info(
             &secp,
@@ -104,13 +117,10 @@ mod tests {
             params.deposit_timeout,
         ).unwrap();
 
-        let request_txid = Txid::all_zeros();
+        let request_txid = request_tx.compute_txid();
         let mut tx = build_deposit_tx(&secp, request_txid, &committee, &params).unwrap();
 
-        let prevouts = [TxOut {
-            value: params.deposit_size,
-            script_pubkey: ScriptBuf::new_p2tr_tweaked(request_spend_info.output_key()),
-        }];
+        let prevouts = [request_tx.output[0].clone()];
         presign_deposit_tx(
             &secp, &mut tx, &committee.keypair, &request_spend_info, &prevouts,
         ).unwrap();
@@ -118,7 +128,6 @@ mod tests {
         assert_eq!(tx.input[0].witness.len(), 1);
         assert_eq!(tx.input[0].witness[0].len(), 64);
 
-        use crate::network::BITCOIN_NETWORK;
         BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).unwrap();
     }
 }

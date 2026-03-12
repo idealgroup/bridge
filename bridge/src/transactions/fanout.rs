@@ -26,6 +26,18 @@ impl FanoutTree {
         let txid = leaf_level[tx_index].compute_txid();
         OutPoint::new(txid, output_index as u32)
     }
+
+    /// Returns the prevouts needed to sign/verify a kickoff transaction for a given slot.
+    pub fn kickoff_prevouts(&self, params: &Params, slot: usize) -> Vec<TxOut> {
+        let leaf_level = &self.levels[self.levels.len() - 1];
+        let tx_index = slot / params.fanout_branching;
+        (0..params.lamport_chunks_per_slot)
+            .map(|chunk| {
+                let output_index = (slot % params.fanout_branching) * params.lamport_chunks_per_slot + chunk;
+                leaf_level[tx_index].output[output_index].clone()
+            })
+            .collect()
+    }
 }
 
 /// Builds the complete fanout tree for an operator.
@@ -37,7 +49,8 @@ pub fn build_fanout_tree(
     let mut levels: Vec<Vec<Transaction>> = Vec::with_capacity(params.fanout_depth);
 
     // Level 0 (root): single tx spending operator's init_utxo
-    let root_tx = build_intermediate_tx(secp, operator.init_utxo, operator.pubkey, params);
+    let root_output_value = params.fanout_output_value(0);
+    let root_tx = build_intermediate_tx(secp, operator.init_utxo, operator.pubkey, params, root_output_value);
     levels.push(vec![root_tx]);
 
     // Intermediate levels (1..depth-1)
@@ -58,7 +71,8 @@ pub fn build_fanout_tree(
                     )?;
                     current_level.push(tx);
                 } else {
-                    let tx = build_intermediate_tx(secp, outpoint, operator.pubkey, params);
+                    let output_value = params.fanout_output_value(depth);
+                    let tx = build_intermediate_tx(secp, outpoint, operator.pubkey, params, output_value);
                     current_level.push(tx);
                 }
             }
@@ -135,12 +149,13 @@ fn build_intermediate_tx(
     input: OutPoint,
     operator_pubkey: XOnlyPublicKey,
     params: &Params,
+    output_value: bitcoin::Amount,
 ) -> Transaction {
     let address = Address::p2tr(secp, operator_pubkey, None, Network::Bitcoin);
 
     let outputs: Vec<TxOut> = (0..params.fanout_branching)
         .map(|_| TxOut {
-            value: params.dust_amount,
+            value: output_value,
             script_pubkey: address.script_pubkey(),
         })
         .collect();
@@ -244,12 +259,15 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = test_rng();
         let params = Params::test_defaults();
-        let init_utxo = OutPoint::new(Txid::all_zeros(), 0);
-        let operator = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
+
+        use crate::network::BITCOIN_NETWORK;
+
+        let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
 
         let mut tree = build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
-            value: params.dust_amount,
+            value: params.fanout_init_value(),
             script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin)
                 .script_pubkey(),
         };
@@ -264,8 +282,7 @@ mod tests {
             }
         }
 
-        // Verify root tx key-spend against init_txout
-        use crate::network::BITCOIN_NETWORK;
+        // Verify root tx key-spend against init_txout (auto-broadcasts in regtest)
         BITCOIN_NETWORK
             .verify_input(&tree.levels[0][0], 0, &[init_txout.clone()])
             .unwrap();
@@ -311,6 +328,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "regtest", ignore)]
     fn test_fanout_wrong_key_rejected() {
         let secp = Secp256k1::new();
         let mut rng = test_rng();
@@ -320,7 +338,7 @@ mod tests {
 
         let mut tree = build_fanout_tree(&secp, &operator_a, &params).unwrap();
         let init_txout = TxOut {
-            value: params.dust_amount,
+            value: params.fanout_init_value(),
             script_pubkey: Address::p2tr(&secp, operator_a.pubkey, None, Network::Bitcoin)
                 .script_pubkey(),
         };
@@ -330,7 +348,7 @@ mod tests {
         let init_utxo_b = OutPoint::new(Txid::all_zeros(), 1);
         let operator_b = Operator::new(&mut rng, &secp, init_utxo_b, params.deposit_count);
         let wrong_prevout = TxOut {
-            value: params.dust_amount,
+            value: params.fanout_init_value(),
             script_pubkey: Address::p2tr(&secp, operator_b.pubkey, None, Network::Bitcoin)
                 .script_pubkey(),
         };

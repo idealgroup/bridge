@@ -59,6 +59,31 @@ impl Params {
         let end = ((chunk + 1) * lamport::MAX_BITS_PER_CHUNK).min(total_bits);
         (start, end)
     }
+
+    /// Output value for each fanout intermediate tx output at a given depth.
+    ///
+    /// Leaf outputs (at depth == fanout_depth - 1) use dust_amount.
+    /// Intermediate outputs carry enough value to fund their entire subtree.
+    pub fn fanout_output_value(&self, depth: usize) -> Amount {
+        if depth >= self.fanout_depth - 1 {
+            return self.dust_amount;
+        }
+        let child_depth = depth + 1;
+        if child_depth == self.fanout_depth - 1 {
+            // Next level is leaf: each leaf tx produces branching * chunks outputs of dust
+            let leaf_total = self.fanout_branching * self.lamport_chunks_per_slot;
+            Amount::from_sat(leaf_total as u64 * self.dust_amount.to_sat())
+        } else {
+            // Next level is intermediate: each child output has fanout_output_value(child_depth)
+            let child_value = self.fanout_output_value(child_depth);
+            Amount::from_sat(self.fanout_branching as u64 * child_value.to_sat())
+        }
+    }
+
+    /// Total input value needed for the operator's init_utxo to fund the whole fanout tree.
+    pub fn fanout_init_value(&self) -> Amount {
+        Amount::from_sat(self.fanout_branching as u64 * self.fanout_output_value(0).to_sat())
+    }
 }
 
 #[cfg(test)]

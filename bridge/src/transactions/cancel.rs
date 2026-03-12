@@ -120,10 +120,24 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let depositor = Depositor::new(
-            &mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0),
-        );
+
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::request;
+
+        let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size);
         let committee = Committee::new(&mut rng, &secp);
+
+        // Build and sign request_tx (parent)
+        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let depositor_prevout = TxOut {
+            value: params.deposit_size,
+            script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
+                .script_pubkey(),
+        };
+        request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64);
 
         let request_spend_info = scripts::request_spend_info(
             &secp,
@@ -133,13 +147,10 @@ mod tests {
             params.deposit_timeout,
         ).unwrap();
 
-        let request_txid = Txid::all_zeros();
+        let request_txid = request_tx.compute_txid();
         let mut tx = build_cancel_tx(&secp, &depositor, request_txid, &params).unwrap();
 
-        let prevouts = [TxOut {
-            value: params.deposit_size,
-            script_pubkey: ScriptBuf::new_p2tr_tweaked(request_spend_info.output_key()),
-        }];
+        let prevouts = [request_tx.output[0].clone()];
         sign_cancel_tx(
             &secp, &mut tx, &depositor.keypair,
             &depositor.deposit_secret,
@@ -152,10 +163,9 @@ mod tests {
 
         // Witness: sig + deposit_secret + script + control_block
         assert_eq!(tx.input[0].witness.len(), 4);
-        assert_eq!(tx.input[0].witness[0].len(), 64); // schnorr sig (Default sighash)
-        assert_eq!(tx.input[0].witness[1].len(), 32); // deposit secret
+        assert_eq!(tx.input[0].witness[0].len(), 64);
+        assert_eq!(tx.input[0].witness[1].len(), 32);
 
-        use crate::network::BITCOIN_NETWORK;
         BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).unwrap();
     }
 
@@ -164,23 +174,33 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let depositor = Depositor::new(
-            &mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0),
-        );
+
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::request;
+
+        let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size);
         let committee = Committee::new(&mut rng, &secp);
+
+        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let depositor_prevout = TxOut {
+            value: params.deposit_size,
+            script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
+                .script_pubkey(),
+        };
+        request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64);
 
         let request_spend_info = scripts::request_spend_info(
             &secp, committee.pubkey, depositor.pubkey,
             depositor.deposit_secret_hash(), params.deposit_timeout,
         ).unwrap();
 
-        let request_txid = Txid::all_zeros();
+        let request_txid = request_tx.compute_txid();
         let mut tx = build_cancel_tx(&secp, &depositor, request_txid, &params).unwrap();
 
-        let prevouts = [TxOut {
-            value: params.deposit_size,
-            script_pubkey: ScriptBuf::new_p2tr_tweaked(request_spend_info.output_key()),
-        }];
+        let prevouts = [request_tx.output[0].clone()];
 
         let wrong_secret = [0xff; 32];
         sign_cancel_tx(
@@ -190,7 +210,6 @@ mod tests {
             params.deposit_timeout, &prevouts,
         ).unwrap();
 
-        use crate::network::BITCOIN_NETWORK;
         assert!(
             BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).is_err(),
             "wrong deposit secret should be rejected"
@@ -202,26 +221,36 @@ mod tests {
         let secp = Secp256k1::new();
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
-        let depositor = Depositor::new(
-            &mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0),
-        );
+
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::request;
+
+        let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size);
         let committee = Committee::new(&mut rng, &secp);
+
+        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let depositor_prevout = TxOut {
+            value: params.deposit_size,
+            script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
+                .script_pubkey(),
+        };
+        request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
+        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        // Do NOT mine extra blocks — CSV should fail
 
         let request_spend_info = scripts::request_spend_info(
             &secp, committee.pubkey, depositor.pubkey,
             depositor.deposit_secret_hash(), params.deposit_timeout,
         ).unwrap();
 
-        let request_txid = Txid::all_zeros();
+        let request_txid = request_tx.compute_txid();
         let mut tx = build_cancel_tx(&secp, &depositor, request_txid, &params).unwrap();
 
         // Set sequence too low (< deposit_timeout = from_height(5))
         tx.input[0].sequence = Sequence::from_height(1);
 
-        let prevouts = [TxOut {
-            value: params.deposit_size,
-            script_pubkey: ScriptBuf::new_p2tr_tweaked(request_spend_info.output_key()),
-        }];
+        let prevouts = [request_tx.output[0].clone()];
 
         sign_cancel_tx(
             &secp, &mut tx, &depositor.keypair,
@@ -230,7 +259,6 @@ mod tests {
             params.deposit_timeout, &prevouts,
         ).unwrap();
 
-        use crate::network::BITCOIN_NETWORK;
         assert!(
             BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).is_err(),
             "CSV with insufficient sequence should be rejected"

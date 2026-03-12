@@ -5,7 +5,22 @@ use bitcoin::taproot::{TaprootBuilder, TaprootSpendInfo};
 use bitcoin::blockdata::transaction::Sequence;
 use bitcoin::secp256k1::Secp256k1;
 
+use bitcoin::Amount;
+
 use crate::BridgeError;
+
+/// P2A (Pay-to-Anchor) dust threshold: 240 sats.
+pub const P2A_DUST: Amount = Amount::from_sat(240);
+
+/// P2A (Pay-to-Anchor) scriptPubKey: `OP_1 <0x4e73>`.
+/// Anyone-can-spend output for CPFP fee bumping on presigned transactions.
+pub fn p2a_script() -> ScriptBuf {
+    use bitcoin::blockdata::script::witness_program::WitnessProgram;
+    use bitcoin::blockdata::script::witness_version::WitnessVersion;
+    let program = WitnessProgram::new(WitnessVersion::V1, &[0x4e, 0x73])
+        .expect("valid 2-byte witness v1 program");
+    ScriptBuf::new_witness_program(&program)
+}
 
 /// BIP-341 unspendable internal key (NUMS point).
 /// H = lift_x(0x0250929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0)
