@@ -70,8 +70,8 @@ All `SIGHASH_ALL` — every tx is fully determined at sign time. The `kickoffTx`
 | Lamport over Winternitz | Lamport | 1:1 mapping to garbled circuit wire labels |
 | BitVM engine | Trait (black box) | GC/SNARK verification out of scope; mock in tests |
 | Ethereum interaction | Typed events | No Ethereum deps; clean integration boundary |
-| Committee signing | `SigningFactory` trait | `LocalSigningFactory` for tests, `MuSig2SigningFactory` for production |
-| Script execution | `ScriptExecutor` trait | `bitcoin-scriptexec` for unit tests, regtest for integration |
+| Committee signing | Direct signing functions | `presign_deposit_tx()` / `presign_withdraw_input0()`; MuSig2 aggregation deferred to CLI/server layer |
+| Script execution | `BitcoinNetwork` enum | `ScriptExec` mode (bitcoin-scriptexec) for unit tests, `Regtest` mode (live bitcoind) for integration |
 | Anchor outputs | P2A on `kickoffTx` + `withdrawTx` | Presigned txs need CPFP fee bumping |
 | Dust outputs | `DUST_AMOUNT` = 546 sats | For non-value-bearing outputs (fanout, connector, disprove) |
 | Timelocks | Relative (`OP_CSV`) | All timelocks are relative to when the parent tx confirms |
@@ -94,7 +94,7 @@ ideal-bridge/
 │       ├── actor.rs            # Operator, Depositor, Committee key material
 │       ├── engine.rs           # BitVMEngine trait
 │       ├── transactions/       # one module per tx type
-│       │   ├── mod.rs
+│       │   ├── mod.rs          # + flow_tests (end-to-end integration tests)
 │       │   ├── fanout.rs
 │       │   ├── kickoff.rs
 │       │   ├── disprove.rs
@@ -102,10 +102,9 @@ ideal-bridge/
 │       │   ├── cancel.rs
 │       │   ├── deposit.rs
 │       │   └── withdraw.rs
-│       ├── scripts.rs          # spending condition script builders
-│       └── setup.rs            # presigning ceremony orchestration
-└── tests/
-    └── integration.rs
+│       ├── scripts.rs          # spending condition script builders + P2A helper
+│       ├── network.rs          # BitcoinNetwork: ScriptExec / Regtest dispatch
+│       └── regtest.rs          # bitcoind regtest node management (behind `regtest` feature)
 ```
 
 ## Build Order
@@ -115,8 +114,8 @@ ideal-bridge/
 3. `engine` — BitVMEngine trait + mock
 4. `scripts` — spending condition script builders
 5. `transactions/` — one at a time: fanout -> kickoff -> disprove -> request -> cancel -> deposit -> withdraw
-6. `setup` — presigning ceremony wiring
-7. Integration test — full deposit + withdrawal cycle
+6. `network` + `regtest` — test infrastructure (ScriptExec + live bitcoind)
+7. Flow tests in `transactions/mod.rs` — end-to-end deposit + withdrawal cycles
 
 ## Parameters (defaults)
 
