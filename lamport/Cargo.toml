@@ -1,0 +1,11 @@
+[package]
+name = "lamport"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitcoin = "0.32"
+rand = "0.8"
+
+[dev-dependencies]
+bitcoin-scriptexec = { git = "https://github.com/BitVM/rust-bitcoin-scriptexec" }
