@@ -49,7 +49,7 @@ Each `kickoffTx` consumes one triple of fanout leaf UTXOs (3 inputs), forcing th
 
 | Transaction | Who presigns | When | Sighash |
 |---|---|---|---|
-| `fanoutTx` | Operator | Setup | `SIGHASH_ALL` |
+| `fanoutTx` | — | Operator signs at will | `SIGHASH_ALL` |
 | `kickoffTx` | — | Operator signs at claim time | `SIGHASH_ALL` |
 | `disproveTx` | — | Hash preimage, no sig | — |
 | `requestTx` | — | Depositor signs at deposit time | `SIGHASH_ALL` |
@@ -65,7 +65,7 @@ All `SIGHASH_ALL` — every tx is fully determined at sign time. The `kickoffTx`
 | Decision | Choice | Rationale |
 |---|---|---|
 | Script type | Taproot (P2TR) | Key-spend for happy path, script-path leaves for alternatives |
-| Lamport hash | `OP_HASH160` (20-byte) | Single opcode, ~80KB pubkey + ~40KB sig for 256-byte proof |
+| Lamport hash | `OP_SHA256` (32-byte) | Collision resistance required (operator could forge unusable GC input with 160-bit hash). ~128KB pubkey + ~40KB sig for 256-byte proof |
 | Lamport chunking | 3 UTXOs per deposit slot | Tapscript stack limit is 1000 items; per-bit verification peaks at N+2 (OP_DUP + pubkey push), so max 998 bits per script. 2048 bits / 998 = 3 chunks. The `lamport` crate exposes `verification_script_for_range` / `witness_data_for_range`; the `bridge` crate wires chunks to fanout outputs and kickoff inputs. |
 | Lamport over Winternitz | Lamport | 1:1 mapping to garbled circuit wire labels |
 | BitVM engine | Trait (black box) | GC/SNARK verification out of scope; mock in tests |
@@ -74,7 +74,7 @@ All `SIGHASH_ALL` — every tx is fully determined at sign time. The `kickoffTx`
 | Script execution | `BitcoinNetwork` enum | `ScriptExec` mode (bitcoin-scriptexec) for unit tests, `Regtest` mode (live bitcoind) for integration |
 | Anchor outputs | P2A on `kickoffTx` + `withdrawTx` | Presigned txs need CPFP fee bumping |
 | Dust outputs | `DUST_AMOUNT` = 546 sats | For non-value-bearing outputs (fanout, connector, disprove) |
-| Timelocks | Relative (`OP_CSV`) | All timelocks are relative to when the parent tx confirms |
+| Timelocks | Relative (`OP_CSV` + `nSequence`) | `cancelTx` uses `OP_CSV` in script; `withdrawTx` connector timelock enforced by `nSequence` committed in committee's presigned input0 |
 | Operator coordination | Out of scope | Economic incentive only; no explicit mechanism |
 | Error handling | `Result<T, BridgeError>` | Unified error enum in `lib.rs`. No panics outside tests. |
 
@@ -126,7 +126,7 @@ ideal-bridge/
 - `LAMPORT_CHUNKS_PER_SLOT`: 3 (derived: `ceil(2048/998)`)
 - `FANOUT_BRANCHING` (`m`): 10
 - `FANOUT_DEPTH` (`L`): derived as `ceil(log_m(DEPOSIT_COUNT))` = 4. Total leaf UTXOs = `DEPOSIT_COUNT * 3` = 30,000 (how deposit slots are packed into leaf-level txs is an optimization detail).
-- `KICKOFF_TIMEOUT`: 3 days (relative, `OP_CSV`)
+- `KICKOFF_TIMEOUT`: 3 days (relative, enforced by `nSequence`)
 - `DEPOSIT_TIMEOUT`: 1 hour (relative, `OP_CSV`)
 - `PROOF_SIZE`: 256 bytes (Groth16 / BN254)
 - `DUST_AMOUNT`: 546 sats

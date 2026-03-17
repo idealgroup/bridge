@@ -22,7 +22,7 @@ pub fn build_kickoff_tx(
     operator: &Operator,
     slot: usize,
     fanout_tree: &FanoutTree,
-    disprove_secret_hash: [u8; 20],
+    disprove_secret_hash: [u8; 32],
     params: &Params,
 ) -> Result<Transaction, BridgeError> {
     if slot >= params.deposit_count {
@@ -51,7 +51,6 @@ pub fn build_kickoff_tx(
         secp,
         operator.pubkey,
         disprove_secret_hash,
-        params.kickoff_timeout,
     )?;
     let connector_output = TxOut {
         value: params.dust_amount,
@@ -154,7 +153,7 @@ mod tests {
         let operator = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
         let tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
 
-        let disprove_hash = [0xaa; 20];
+        let disprove_hash = [0xaa; 32];
         let tx = build_kickoff_tx(&secp, &operator, 0, &tree, disprove_hash, &params).unwrap();
 
         assert_eq!(tx.input.len(), 3);
@@ -189,7 +188,7 @@ mod tests {
         }
 
         let slot = 0;
-        let disprove_hash = [0xaa; 20];
+        let disprove_hash = [0xaa; 32];
         let mut tx = build_kickoff_tx(&secp, &operator, slot, &tree, disprove_hash, &params).unwrap();
 
         let msg = [0xbb; lamport::MSG_LEN];
@@ -225,7 +224,7 @@ mod tests {
         let operator = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
         let tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
 
-        let result = build_kickoff_tx(&secp, &operator, 999, &tree, [0; 20], &params);
+        let result = build_kickoff_tx(&secp, &operator, 999, &tree, [0; 32], &params);
         assert!(result.is_err());
     }
 
@@ -255,7 +254,7 @@ mod tests {
         }
 
         let slot = 0;
-        let disprove_hash = [0xaa; 20];
+        let disprove_hash = [0xaa; 32];
         let mut tx = build_kickoff_tx(&secp, &operator, slot, &tree, disprove_hash, &params).unwrap();
 
         // Sign with a DIFFERENT slot's Lamport key (preimages won't match slot 0's pubkey)

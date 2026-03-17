@@ -36,19 +36,19 @@ pub fn unspendable_internal_key() -> XOnlyPublicKey {
 
 /// Request output (P2TR): committee key-spend + cancel script leaf.
 ///
-/// Cancel leaf: `<deposit_timeout> OP_CSV OP_DROP OP_HASH160 <deposit_secret_hash> OP_EQUALVERIFY <depositor_pubkey> OP_CHECKSIG`
+/// Cancel leaf: `<deposit_timeout> OP_CSV OP_DROP OP_SHA256 <deposit_secret_hash> OP_EQUALVERIFY <depositor_pubkey> OP_CHECKSIG`
 pub fn request_spend_info(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     committee_pubkey: XOnlyPublicKey,
     depositor_pubkey: XOnlyPublicKey,
-    deposit_secret_hash: [u8; 20],
+    deposit_secret_hash: [u8; 32],
     deposit_timeout: Sequence,
 ) -> Result<TaprootSpendInfo, BridgeError> {
     let cancel_script = Builder::new()
         .push_sequence(deposit_timeout)
         .push_opcode(OP_CSV)
         .push_opcode(OP_DROP)
-        .push_opcode(OP_HASH160)
+        .push_opcode(OP_SHA256)
         .push_slice(deposit_secret_hash)
         .push_opcode(OP_EQUALVERIFY)
         .push_x_only_key(&depositor_pubkey)
@@ -92,47 +92,38 @@ pub fn fanout_leaf_spend_info(
 }
 
 /// Kickoff connector output (P2TR):
-/// - Leaf 0 (withdraw): `<operator_pubkey> OP_CHECKSIGVERIFY <kickoff_timeout> OP_CSV`
-/// - Leaf 1 (disprove): `OP_HASH160 <disprove_secret_hash> OP_EQUAL`
+/// - Key-spend: operator (for withdraw path — timelock enforced by nSequence
+///   committed in the committee's presigned withdrawTx input0)
+/// - Script leaf (disprove): `OP_SHA256 <disprove_secret_hash> OP_EQUAL`
 pub fn connector_spend_info(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     operator_pubkey: XOnlyPublicKey,
-    disprove_secret_hash: [u8; 20],
-    kickoff_timeout: Sequence,
+    disprove_secret_hash: [u8; 32],
 ) -> Result<TaprootSpendInfo, BridgeError> {
-    let withdraw_script = Builder::new()
-        .push_x_only_key(&operator_pubkey)
-        .push_opcode(OP_CHECKSIGVERIFY)
-        .push_sequence(kickoff_timeout)
-        .push_opcode(OP_CSV)
-        .into_script();
-
     let disprove_script = Builder::new()
-        .push_opcode(OP_HASH160)
+        .push_opcode(OP_SHA256)
         .push_slice(disprove_secret_hash)
         .push_opcode(OP_EQUAL)
         .into_script();
 
     TaprootBuilder::new()
-        .add_leaf(1, withdraw_script)
+        .add_leaf(0, disprove_script)
         .map_err(|e| BridgeError::TaprootBuilder(format!("{e:?}")))?
-        .add_leaf(1, disprove_script)
-        .map_err(|e| BridgeError::TaprootBuilder(format!("{e:?}")))?
-        .finalize(secp, unspendable_internal_key())
+        .finalize(secp, operator_pubkey)
         .map_err(|e| BridgeError::TaprootBuilder(format!("{e:?}")))
 }
 
 /// Cancel script for spending a request output via the script path.
 pub fn cancel_script(
     depositor_pubkey: XOnlyPublicKey,
-    deposit_secret_hash: [u8; 20],
+    deposit_secret_hash: [u8; 32],
     deposit_timeout: Sequence,
 ) -> ScriptBuf {
     Builder::new()
         .push_sequence(deposit_timeout)
         .push_opcode(OP_CSV)
         .push_opcode(OP_DROP)
-        .push_opcode(OP_HASH160)
+        .push_opcode(OP_SHA256)
         .push_slice(deposit_secret_hash)
         .push_opcode(OP_EQUALVERIFY)
         .push_x_only_key(&depositor_pubkey)
@@ -140,23 +131,10 @@ pub fn cancel_script(
         .into_script()
 }
 
-/// Withdraw leaf script (spending a connector via script path after timeout).
-pub fn withdraw_script(
-    operator_pubkey: XOnlyPublicKey,
-    kickoff_timeout: Sequence,
-) -> ScriptBuf {
-    Builder::new()
-        .push_x_only_key(&operator_pubkey)
-        .push_opcode(OP_CHECKSIGVERIFY)
-        .push_sequence(kickoff_timeout)
-        .push_opcode(OP_CSV)
-        .into_script()
-}
-
 /// Disprove leaf script (spending a connector via hash preimage).
-pub fn disprove_script(disprove_secret_hash: [u8; 20]) -> ScriptBuf {
+pub fn disprove_script(disprove_secret_hash: [u8; 32]) -> ScriptBuf {
     Builder::new()
-        .push_opcode(OP_HASH160)
+        .push_opcode(OP_SHA256)
         .push_slice(disprove_secret_hash)
         .push_opcode(OP_EQUAL)
         .into_script()
@@ -214,7 +192,7 @@ mod tests {
         let depositor = random_keypair(&mut rng, &secp);
         let (cpk, _) = committee.x_only_public_key();
         let (dpk, _) = depositor.x_only_public_key();
-        let hash = [0xab; 20];
+        let hash = [0xab; 32];
         let timeout = Sequence::from_height(5);
 
         let info = request_spend_info(&secp, cpk, dpk, hash, timeout).unwrap();
@@ -227,10 +205,9 @@ mod tests {
         let mut rng = test_rng();
         let operator = random_keypair(&mut rng, &secp);
         let (opk, _) = operator.x_only_public_key();
-        let hash = [0xcd; 20];
-        let timeout = Sequence::from_height(10);
+        let hash = [0xcd; 32];
 
-        let info = connector_spend_info(&secp, opk, hash, timeout).unwrap();
+        let info = connector_spend_info(&secp, opk, hash).unwrap();
         assert_eq!(info.output_key().serialize().len(), 32);
     }
 

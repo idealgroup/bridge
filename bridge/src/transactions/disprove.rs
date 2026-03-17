@@ -34,7 +34,7 @@ pub fn build_disprove_tx(kickoff_txid: Txid) -> Transaction {
 pub fn witness_disprove_tx(
     tx: &mut Transaction,
     disprove_secret: [u8; 20],
-    disprove_secret_hash: [u8; 20],
+    disprove_secret_hash: [u8; 32],
     connector_spend_info: &TaprootSpendInfo,
 ) -> Result<(), BridgeError> {
     let leaf_script = scripts::disprove_script(disprove_secret_hash);
@@ -54,7 +54,7 @@ pub fn witness_disprove_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::hashes::{hash160, Hash};
+    use bitcoin::hashes::{sha256, Hash};
     use bitcoin::secp256k1::Secp256k1;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -100,7 +100,7 @@ mod tests {
 
         let slot = 0;
         let secret = [0xab; 20];
-        let secret_hash = hash160::Hash::hash(&secret).to_byte_array();
+        let secret_hash = sha256::Hash::hash(&secret).to_byte_array();
 
         let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, secret_hash, &params,
@@ -116,9 +116,8 @@ mod tests {
         BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
 
         let kickoff_txid = kickoff_tx.compute_txid();
-        let timeout = params.kickoff_timeout;
         let spend_info = scripts::connector_spend_info(
-            &secp, operator.pubkey, secret_hash, timeout,
+            &secp, operator.pubkey, secret_hash,
         ).unwrap();
 
         let mut tx = build_disprove_tx(kickoff_txid);
@@ -161,7 +160,7 @@ mod tests {
 
         let slot = 0;
         let secret = [0xab; 20];
-        let secret_hash = hash160::Hash::hash(&secret).to_byte_array();
+        let secret_hash = sha256::Hash::hash(&secret).to_byte_array();
 
         let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, secret_hash, &params,
@@ -177,9 +176,8 @@ mod tests {
         BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
 
         let kickoff_txid = kickoff_tx.compute_txid();
-        let timeout = params.kickoff_timeout;
         let spend_info = scripts::connector_spend_info(
-            &secp, operator.pubkey, secret_hash, timeout,
+            &secp, operator.pubkey, secret_hash,
         ).unwrap();
 
         let mut tx = build_disprove_tx(kickoff_txid);

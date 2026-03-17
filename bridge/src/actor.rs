@@ -1,7 +1,7 @@
 use bitcoin::key::{Keypair, UntweakedPublicKey as XOnlyPublicKey};
 use bitcoin::secp256k1::{Secp256k1, SecretKey};
 use bitcoin::OutPoint;
-use bitcoin::hashes::{hash160, Hash};
+use bitcoin::hashes::{sha256, Hash};
 use rand::Rng;
 
 pub struct Operator {
@@ -82,8 +82,8 @@ impl Depositor {
         }
     }
 
-    pub fn deposit_secret_hash(&self) -> [u8; 20] {
-        hash160::Hash::hash(&self.deposit_secret).to_byte_array()
+    pub fn deposit_secret_hash(&self) -> [u8; 32] {
+        sha256::Hash::hash(&self.deposit_secret).to_byte_array()
     }
 }
 
@@ -128,7 +128,7 @@ mod tests {
         let mut rng = test_rng();
         let dep = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
         let hash = dep.deposit_secret_hash();
-        assert_eq!(hash.len(), 20);
+        assert_eq!(hash.len(), 32);
         // Deterministic
         let mut rng2 = test_rng();
         let dep2 = Depositor::new(&mut rng2, &secp, 0, dummy_outpoint());

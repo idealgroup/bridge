@@ -1,4 +1,4 @@
-use bitcoin::hashes::{hash160, Hash};
+use bitcoin::hashes::{sha256, Hash};
 use bitcoin::opcodes::all::*;
 use bitcoin::opcodes::OP_TRUE;
 use bitcoin::script::{Builder, ScriptBuf};
@@ -7,7 +7,7 @@ use rand::Rng;
 pub const MSG_LEN: usize = 256;
 pub const NUM_BITS: usize = MSG_LEN * 8;
 pub const PREIMAGE_LEN: usize = 20;
-pub const HASH_LEN: usize = 20;
+pub const HASH_LEN: usize = 32;
 
 /// Maximum bits per chunk to stay within the tapscript 1000 stack item limit.
 /// Each bit starts with one preimage on the stack, but verification temporarily
@@ -18,14 +18,14 @@ pub const MAX_BITS_PER_CHUNK: usize = 998;
 /// Two random preimages per bit (one for 0, one for 1).
 pub struct SecretKey(pub [[[u8; PREIMAGE_LEN]; 2]; NUM_BITS]);
 
-/// HASH160 of each preimage in the secret key.
+/// SHA256 of each preimage in the secret key.
 pub struct PublicKey(pub [[[u8; HASH_LEN]; 2]; NUM_BITS]);
 
 /// One revealed preimage per bit, selected by the message bit.
 pub struct Signature(pub [[u8; PREIMAGE_LEN]; NUM_BITS]);
 
-fn hash160(data: &[u8]) -> [u8; HASH_LEN] {
-    hash160::Hash::hash(data).to_byte_array()
+fn sha256(data: &[u8]) -> [u8; HASH_LEN] {
+    sha256::Hash::hash(data).to_byte_array()
 }
 
 fn get_bit(msg: &[u8; MSG_LEN], bit_index: usize) -> usize {
@@ -47,8 +47,8 @@ impl SecretKey {
     pub fn public_key(&self) -> Box<PublicKey> {
         let mut pk = Box::new(PublicKey([[[0u8; HASH_LEN]; 2]; NUM_BITS]));
         for (i, pair) in self.0.iter().enumerate() {
-            pk.0[i][0] = hash160(&pair[0]);
-            pk.0[i][1] = hash160(&pair[1]);
+            pk.0[i][0] = sha256(&pair[0]);
+            pk.0[i][1] = sha256(&pair[1]);
         }
         pk
     }
@@ -67,7 +67,7 @@ impl PublicKey {
     pub fn verify(&self, msg: &[u8; MSG_LEN], sig: &Signature) -> bool {
         for i in 0..NUM_BITS {
             let bit = get_bit(msg, i);
-            let hash = hash160(&sig.0[i]);
+            let hash = sha256(&sig.0[i]);
             if hash != self.0[i][bit] {
                 return false;
             }
@@ -82,10 +82,10 @@ impl PublicKey {
     ///
     /// Per bit i:
     /// ```text
-    /// OP_HASH160
-    /// OP_DUP
-    /// <pk_i_0>
-    /// OP_EQUAL
+    /// OP_SHA256       (hash the preimage)
+    /// OP_DUP          (duplicate the hash)
+    /// <pk_i_0>        (push expected hash for bit=0)
+    /// OP_EQUAL        (check match)
     /// OP_IF
     ///     OP_DROP
     /// OP_ELSE
@@ -98,7 +98,7 @@ impl PublicKey {
         let mut builder = Builder::new();
         for i in start..end {
             builder = builder
-                .push_opcode(OP_HASH160)
+                .push_opcode(OP_SHA256)
                 .push_opcode(OP_DUP)
                 .push_slice(self.0[i][0])
                 .push_opcode(OP_EQUAL)
@@ -180,12 +180,12 @@ mod tests {
         let script = pk.verification_script();
         let script_bytes = script.as_bytes();
 
-        // Per bit: OP_HASH160(1) + OP_DUP(1) + push 20-byte hash(1+20) + OP_EQUAL(1)
-        //        + OP_IF(1) + OP_DROP(1) + OP_ELSE(1) + push 20-byte hash(1+20)
+        // Per bit: OP_SHA256(1) + OP_DUP(1) + push 32-byte hash(1+32) + OP_EQUAL(1)
+        //        + OP_IF(1) + OP_DROP(1) + OP_ELSE(1) + push 32-byte hash(1+32)
         //        + OP_EQUALVERIFY(1) + OP_ENDIF(1)
-        // = 50 bytes per bit
+        // = 74 bytes per bit
         // + 1 byte for final OP_TRUE
-        let expected_len = NUM_BITS * 50 + 1;
+        let expected_len = NUM_BITS * 74 + 1;
         assert_eq!(script_bytes.len(), expected_len);
     }
 

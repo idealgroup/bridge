@@ -8,7 +8,7 @@ pub mod withdraw;
 
 #[cfg(test)]
 mod flow_tests {
-    use bitcoin::hashes::{hash160, Hash};
+    use bitcoin::hashes::{sha256, Hash};
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::transaction::TxOut;
     use bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid};
@@ -131,7 +131,7 @@ mod flow_tests {
         let (operator, tree) = setup_operator_with_fanout(&secp, &mut rng, &params);
 
         let slot = 0;
-        let disprove_hash = [0xaa; 20];
+        let disprove_hash = [0xaa; 32];
         let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, disprove_hash, &params,
         ).unwrap();
@@ -177,7 +177,7 @@ mod flow_tests {
 
         let slot = 0;
         let disprove_secret = [0xab; 20];
-        let disprove_hash = hash160::Hash::hash(&disprove_secret).to_byte_array();
+        let disprove_hash = sha256::Hash::hash(&disprove_secret).to_byte_array();
         let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, disprove_hash, &params,
         ).unwrap();
@@ -208,12 +208,11 @@ mod flow_tests {
         ).unwrap();
 
         let connector_info = scripts::connector_spend_info(
-            &secp, operator.pubkey, disprove_hash, params.kickoff_timeout,
+            &secp, operator.pubkey, disprove_hash,
         ).unwrap();
         withdraw::sign_withdraw_input1(
             &secp, &mut withdraw_tx, &operator.keypair,
-            &connector_info, operator.pubkey, params.kickoff_timeout,
-            &withdraw_prevouts,
+            &connector_info, &withdraw_prevouts,
         ).unwrap();
 
         BITCOIN_NETWORK.verify_input(&withdraw_tx, 0, &withdraw_prevouts).unwrap();
@@ -230,7 +229,7 @@ mod flow_tests {
 
         let slot = 0;
         let disprove_secret = [0xab; 20];
-        let disprove_hash = hash160::Hash::hash(&disprove_secret).to_byte_array();
+        let disprove_hash = sha256::Hash::hash(&disprove_secret).to_byte_array();
 
         let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, disprove_hash, &params,
@@ -248,7 +247,7 @@ mod flow_tests {
         let kickoff_txid = kickoff_tx.compute_txid();
 
         let connector_info = scripts::connector_spend_info(
-            &secp, operator.pubkey, disprove_hash, params.kickoff_timeout,
+            &secp, operator.pubkey, disprove_hash,
         ).unwrap();
 
         let mut disprove_tx = disprove::build_disprove_tx(kickoff_txid);
@@ -290,9 +289,9 @@ mod flow_tests {
             &secp, deposit_txid, kickoff_txid, &operator, &params,
         ).unwrap();
 
-        let disprove_hash = [0xaa; 20];
+        let disprove_hash = [0xaa; 32];
         let connector_info = scripts::connector_spend_info(
-            &secp, operator.pubkey, disprove_hash, params.kickoff_timeout,
+            &secp, operator.pubkey, disprove_hash,
         ).unwrap();
         let prevouts = vec![
             deposit_tx.output[0].clone(),

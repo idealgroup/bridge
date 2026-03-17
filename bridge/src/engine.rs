@@ -13,7 +13,7 @@ pub trait BitVMEngine {
 }
 
 /// Mock engine: proof is valid iff proof[0] == 0x00.
-/// For invalid proofs, the disprove secret is the HASH160 of proof[0..20].
+/// For invalid proofs, the disprove secret is proof[0..20].
 pub struct MockEngine;
 
 impl BitVMEngine for MockEngine {
@@ -29,9 +29,9 @@ impl BitVMEngine for MockEngine {
         if proof[0] == 0x00 {
             Ok(None)
         } else {
-            use bitcoin::hashes::{hash160, Hash};
-            let hash = hash160::Hash::hash(&proof[0..20]);
-            Ok(Some(hash.to_byte_array()))
+            let mut secret = [0u8; 20];
+            secret.copy_from_slice(&proof[0..20]);
+            Ok(Some(secret))
         }
     }
 }

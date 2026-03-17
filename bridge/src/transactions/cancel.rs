@@ -49,7 +49,7 @@ pub fn sign_cancel_tx(
     deposit_secret: &[u8; 32],
     request_spend_info: &TaprootSpendInfo,
     depositor_pubkey: XOnlyPublicKey,
-    deposit_secret_hash: [u8; 20],
+    deposit_secret_hash: [u8; 32],
     deposit_timeout: Sequence,
     prevouts: &[TxOut],
 ) -> Result<(), BridgeError> {
