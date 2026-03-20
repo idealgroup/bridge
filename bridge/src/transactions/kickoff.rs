@@ -183,9 +183,10 @@ mod tests {
         // Confirm fanout tree
         for level in &tree.levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let slot = 0;
         let disprove_hash = [0xaa; 32];
@@ -210,9 +211,8 @@ mod tests {
             assert_eq!(tx.input[chunk].witness[sig_idx].len(), 64);
         }
 
-        for i in 0..params.lamport_chunks_per_slot {
-            BITCOIN_NETWORK.verify_input(&tx, i, &prevouts).unwrap();
-        }
+        BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -249,9 +249,10 @@ mod tests {
 
         for level in &tree.levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let slot = 0;
         let disprove_hash = [0xaa; 32];
@@ -269,13 +270,9 @@ mod tests {
             &wrong_lamport_sig, &correct_lamport_pk, &prevouts, &params,
         ).unwrap();
 
-        let mut any_failed = false;
-        for i in 0..params.lamport_chunks_per_slot {
-            if BITCOIN_NETWORK.verify_input(&tx, i, &prevouts).is_err() {
-                any_failed = true;
-                break;
-            }
-        }
-        assert!(any_failed, "wrong Lamport preimages should be rejected");
+        assert!(
+            BITCOIN_NETWORK.broadcast_tx(&tx).is_err(),
+            "wrong Lamport preimages should be rejected"
+        );
     }
 }

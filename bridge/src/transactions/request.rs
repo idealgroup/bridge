@@ -119,6 +119,7 @@ mod tests {
         assert_eq!(tx.input[0].witness.len(), 1);
         assert_eq!(tx.input[0].witness[0].len(), 64);
 
-        BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 }

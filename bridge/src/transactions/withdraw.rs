@@ -182,7 +182,8 @@ mod tests {
             script_pubkey: Address::p2tr(&secp, depositor.pubkey, None, Network::Bitcoin).script_pubkey(),
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let request_txid = request_tx.compute_txid();
         let request_spend_info = scripts::request_spend_info(
@@ -194,7 +195,8 @@ mod tests {
             &secp, &mut deposit_tx, &committee.keypair,
             &request_spend_info, &[request_tx.output[0].clone()],
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&deposit_tx);
+        BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         // Build fanout → kickoff chain
         let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
@@ -205,9 +207,10 @@ mod tests {
         fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
         for level in &tree.levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let slot = 0;
         let disprove_hash = [0xaa; 32];
@@ -222,7 +225,7 @@ mod tests {
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
         BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
 
         // Build withdraw tx
@@ -247,7 +250,8 @@ mod tests {
             &connector_info, &prevouts,
         ).unwrap();
 
-        BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -281,7 +285,8 @@ mod tests {
             script_pubkey: Address::p2tr(&secp, depositor.pubkey, None, Network::Bitcoin).script_pubkey(),
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let request_txid = request_tx.compute_txid();
         let request_spend_info = scripts::request_spend_info(
@@ -293,7 +298,8 @@ mod tests {
             &secp, &mut deposit_tx, &committee.keypair,
             &request_spend_info, &[request_tx.output[0].clone()],
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&deposit_tx);
+        BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         // Build and confirm fanout tree
         let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
@@ -304,9 +310,10 @@ mod tests {
         fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
         for level in &tree.levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
 
         // Build and confirm kickoff
         let slot = 0;
@@ -322,7 +329,7 @@ mod tests {
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
         BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
 
         let connector_info = scripts::connector_spend_info(
@@ -350,7 +357,8 @@ mod tests {
         assert_eq!(tx.input[1].witness.len(), 1);
         assert_eq!(tx.input[1].witness[0].len(), 64);
 
-        BITCOIN_NETWORK.verify_input(&tx, 1, &prevouts).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -377,9 +385,10 @@ mod tests {
         fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
         for level in &tree.levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let slot = 0;
         let disprove_hash = sha256::Hash::hash(&[0xab; 20]).to_byte_array();
@@ -394,7 +403,7 @@ mod tests {
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
         BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
 
         let connector_info = scripts::connector_spend_info(
@@ -420,7 +429,7 @@ mod tests {
         ).unwrap();
 
         assert!(
-            BITCOIN_NETWORK.verify_input(&tx, 1, &prevouts).is_err(),
+            BITCOIN_NETWORK.broadcast_tx(&tx).is_err(),
             "wrong operator key should be rejected"
         );
     }

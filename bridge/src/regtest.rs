@@ -134,7 +134,7 @@ impl RegtestNode {
             .test_mempool_accept(&[hex])
             .map_err(|e| BridgeError::Regtest(format!("test_mempool_accept: {e}")))?;
         let result = results.first();
-        let allowed = result.map_or(false, |r| r.allowed);
+        let allowed = result.is_some_and(|r| r.allowed);
         let reason = result.and_then(|r| r.reject_reason.clone());
         Ok((allowed, reason))
     }

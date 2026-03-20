@@ -282,22 +282,13 @@ mod tests {
             }
         }
 
-        // Verify root tx key-spend against init_txout (auto-broadcasts in regtest)
-        BITCOIN_NETWORK
-            .verify_input(&tree.levels[0][0], 0, &[init_txout.clone()])
-            .unwrap();
-
-        // Verify all deeper levels against parent outputs
-        for depth in 1..tree.levels.len() {
-            for node_idx in 0..tree.levels[depth].len() {
-                let parent_idx = node_idx / params.fanout_branching;
-                let output_idx = node_idx % params.fanout_branching;
-                let prevout = tree.levels[depth - 1][parent_idx].output[output_idx].clone();
-                BITCOIN_NETWORK
-                    .verify_input(&tree.levels[depth][node_idx], 0, &[prevout])
-                    .unwrap();
+        // Broadcast all txs in order (root first, then deeper levels)
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]

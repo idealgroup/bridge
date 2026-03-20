@@ -77,6 +77,7 @@ All `SIGHASH_ALL` — every tx is fully determined at sign time. The `kickoffTx`
 | Dust outputs | `DUST_AMOUNT` = 546 sats | For non-value-bearing outputs (fanout, connector, disprove) |
 | Timelocks | Relative (`OP_CSV` + `nSequence`) | `cancelTx` uses `OP_CSV` in script; `withdrawTx` connector timelock enforced by `nSequence` committed in committee's presigned input0 |
 | Operator coordination | Out of scope | Economic incentive only; no explicit mechanism |
+| Actor isolation | Separate clients | Each actor (Operator, Depositor, Committee, Challenger) will run as its own client/process. No shared in-memory state between actors — each must own all data for its workflow or learn it from on-chain data. Tests may share objects for convenience but production code must not assume cross-actor access. |
 | Error handling | `Result<T, BridgeError>` | Unified error enum in `lib.rs`. No panics outside tests. |
 
 ## Crate Structure

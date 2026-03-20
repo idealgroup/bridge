@@ -43,7 +43,8 @@ mod flow_tests {
             script_pubkey: Address::p2tr(secp, depositor.pubkey, None, Network::Bitcoin).script_pubkey(),
         };
         request::sign_request_tx(secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
         request_tx
     }
 
@@ -64,9 +65,10 @@ mod flow_tests {
         fanout::sign_fanout_tree(secp, &mut tree, &operator.keypair, &init_txout, params).unwrap();
         for level in &tree.levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
         (operator, tree)
     }
 
@@ -91,7 +93,8 @@ mod flow_tests {
             &request_spend_info, &prevouts,
         ).unwrap();
 
-        BITCOIN_NETWORK.verify_input(&deposit_tx, 0, &prevouts).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -119,7 +122,8 @@ mod flow_tests {
             params.deposit_timeout, &prevouts,
         ).unwrap();
 
-        BITCOIN_NETWORK.verify_input(&cancel_tx, 0, &prevouts).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&cancel_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -147,9 +151,8 @@ mod flow_tests {
             &lamport_sig, &lamport_pk, &prevouts, &params,
         ).unwrap();
 
-        for i in 0..params.lamport_chunks_per_slot {
-            BITCOIN_NETWORK.verify_input(&kickoff_tx, i, &prevouts).unwrap();
-        }
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -170,7 +173,8 @@ mod flow_tests {
             &secp, &mut deposit_tx, &committee.keypair,
             &request_spend_info, &[request_tx.output[0].clone()],
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&deposit_tx);
+        BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         // Build fanout → kickoff chain
         let (operator, tree) = setup_operator_with_fanout(&secp, &mut rng, &params);
@@ -189,7 +193,7 @@ mod flow_tests {
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
         BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
 
         // Build withdraw tx chaining deposit + kickoff
@@ -215,8 +219,8 @@ mod flow_tests {
             &connector_info, &withdraw_prevouts,
         ).unwrap();
 
-        BITCOIN_NETWORK.verify_input(&withdraw_tx, 0, &withdraw_prevouts).unwrap();
-        BITCOIN_NETWORK.verify_input(&withdraw_tx, 1, &withdraw_prevouts).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&withdraw_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -242,7 +246,8 @@ mod flow_tests {
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let kickoff_txid = kickoff_tx.compute_txid();
 
@@ -255,8 +260,8 @@ mod flow_tests {
             &mut disprove_tx, disprove_secret, disprove_hash, &connector_info,
         ).unwrap();
 
-        let prevouts = [kickoff_tx.output[0].clone()];
-        BITCOIN_NETWORK.verify_input(&disprove_tx, 0, &prevouts).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&disprove_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -278,7 +283,8 @@ mod flow_tests {
             &secp, &mut deposit_tx, &committee.keypair,
             &request_spend_info, &[request_tx.output[0].clone()],
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&deposit_tx);
+        BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         // Try to spend deposit output with attacker's key
         let init_utxo = OutPoint::new(Txid::all_zeros(), 1);
@@ -307,7 +313,7 @@ mod flow_tests {
         ).unwrap();
 
         assert!(
-            BITCOIN_NETWORK.verify_input(&withdraw_tx, 0, &prevouts).is_err(),
+            BITCOIN_NETWORK.broadcast_tx(&withdraw_tx).is_err(),
             "non-committee key should be rejected"
         );
     }

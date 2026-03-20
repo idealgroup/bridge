@@ -445,7 +445,8 @@ mod tests {
 
         // Depositor creates request
         let request_tx = depositor.create_request(&secp, &committee, &params).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
         let request_txid = request_tx.compute_txid();
 
         // Committee presigns deposit
@@ -459,9 +460,8 @@ mod tests {
             )
             .unwrap();
 
-        BITCOIN_NETWORK
-            .verify_input(&deposit_tx, 0, &[request_tx.output[0].clone()])
-            .unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         // Depositor stores it
         depositor.receive_presigned_deposit(deposit_tx);
@@ -480,8 +480,8 @@ mod tests {
         let committee = Committee::new(&mut rng, &secp);
 
         let request_tx = depositor.create_request(&secp, &committee, &params).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&request_tx);
-        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64);
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64 + 1);
         let request_txid = request_tx.compute_txid();
 
         let cancel_tx = depositor
@@ -494,9 +494,8 @@ mod tests {
             )
             .unwrap();
 
-        BITCOIN_NETWORK
-            .verify_input(&cancel_tx, 0, &[request_tx.output[0].clone()])
-            .unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&cancel_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -522,9 +521,10 @@ mod tests {
         // Confirm fanout tree
         for level in &operator.fanout_tree.as_ref().unwrap().levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let slot = 0;
         let disprove_hash = [0xaa; 32];
@@ -534,16 +534,8 @@ mod tests {
             .create_kickoff(&secp, slot, disprove_hash, &proof_msg, &params)
             .unwrap();
 
-        let prevouts = operator
-            .fanout_tree
-            .as_ref()
-            .unwrap()
-            .kickoff_prevouts(&params, slot);
-        for i in 0..params.lamport_chunks_per_slot {
-            BITCOIN_NETWORK
-                .verify_input(&kickoff_tx, i, &prevouts)
-                .unwrap();
-        }
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -560,13 +552,15 @@ mod tests {
 
         // 2. Request → deposit chain
         let request_tx = depositor.create_request(&secp, &committee, &params).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
         let request_txid = request_tx.compute_txid();
 
         let deposit_tx = committee
             .presign_deposit(&secp, request_txid, &depositor, &request_tx.output[0], &params)
             .unwrap();
-        BITCOIN_NETWORK.confirm_tx(&deposit_tx);
+        BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
         let deposit_txid = deposit_tx.compute_txid();
 
         // 3. Operator builds fanout tree (builds + signs, stored internally)
@@ -620,9 +614,10 @@ mod tests {
         // 6. Confirm fanout tree on-chain
         for level in &operator.fanout_tree.as_ref().unwrap().levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
 
         // 7. Operator creates and broadcasts kickoff
         let proof_msg = [0xbb; lamport::MSG_LEN];
@@ -630,7 +625,8 @@ mod tests {
             .create_kickoff(&secp, slot, disprove_hash, &proof_msg, &params)
             .unwrap();
         assert_eq!(kickoff_tx.compute_txid(), kickoff_txid);
-        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         // 8. Wait for timeout
         BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
@@ -640,13 +636,9 @@ mod tests {
             .complete_withdraw(&secp, slot, disprove_hash, &withdraw_prevouts)
             .unwrap();
 
-        // 10. Verify both inputs
-        BITCOIN_NETWORK
-            .verify_input(&withdraw_tx, 0, &withdraw_prevouts)
-            .unwrap();
-        BITCOIN_NETWORK
-            .verify_input(&withdraw_tx, 1, &withdraw_prevouts)
-            .unwrap();
+        // 10. Broadcast and confirm
+        BITCOIN_NETWORK.broadcast_tx(&withdraw_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -667,9 +659,10 @@ mod tests {
         operator.create_fanout_tree(&secp, &init_txout, &params).unwrap();
         for level in &operator.fanout_tree.as_ref().unwrap().levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
 
         // Challenger checks an invalid proof
         let challenger = Challenger::new();
@@ -690,7 +683,8 @@ mod tests {
         let kickoff_tx = operator
             .create_kickoff(&secp, slot, disprove_hash, &proof_msg, &params)
             .unwrap();
-        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
         let kickoff_txid = kickoff_tx.compute_txid();
 
         // Challenger builds disprove tx
@@ -704,10 +698,8 @@ mod tests {
             )
             .unwrap();
 
-        let prevouts = [kickoff_tx.output[0].clone()];
-        BITCOIN_NETWORK
-            .verify_input(&disprove_tx, 0, &prevouts)
-            .unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&disprove_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]

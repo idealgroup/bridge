@@ -94,9 +94,10 @@ mod tests {
         fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
         for level in &tree.levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let slot = 0;
         let secret = [0xab; 20];
@@ -113,7 +114,8 @@ mod tests {
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let kickoff_txid = kickoff_tx.compute_txid();
         let spend_info = scripts::connector_spend_info(
@@ -126,10 +128,8 @@ mod tests {
         assert_eq!(tx.input[0].witness.len(), 3);
         assert_eq!(tx.input[0].witness[0], secret);
 
-        let connector_prevout = kickoff_tx.output[0].clone();
-        BITCOIN_NETWORK
-            .verify_input(&tx, 0, &[connector_prevout])
-            .unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -154,9 +154,10 @@ mod tests {
         fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
         for level in &tree.levels {
             for tx in level {
-                BITCOIN_NETWORK.confirm_tx(tx);
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let slot = 0;
         let secret = [0xab; 20];
@@ -173,7 +174,8 @@ mod tests {
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&kickoff_tx);
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let kickoff_txid = kickoff_tx.compute_txid();
         let spend_info = scripts::connector_spend_info(
@@ -186,9 +188,8 @@ mod tests {
         let wrong_secret = [0xcc; 20];
         witness_disprove_tx(&mut tx, wrong_secret, secret_hash, &spend_info).unwrap();
 
-        let connector_prevout = kickoff_tx.output[0].clone();
         assert!(
-            BITCOIN_NETWORK.verify_input(&tx, 0, &[connector_prevout]).is_err(),
+            BITCOIN_NETWORK.broadcast_tx(&tx).is_err(),
             "wrong hash preimage should be rejected"
         );
     }

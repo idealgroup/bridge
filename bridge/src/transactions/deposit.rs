@@ -107,7 +107,8 @@ mod tests {
                 .script_pubkey(),
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
 
         let request_spend_info = scripts::request_spend_info(
             &secp,
@@ -128,6 +129,7 @@ mod tests {
         assert_eq!(tx.input[0].witness.len(), 1);
         assert_eq!(tx.input[0].witness[0].len(), 64);
 
-        BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 }

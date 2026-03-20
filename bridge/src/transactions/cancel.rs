@@ -137,8 +137,8 @@ mod tests {
                 .script_pubkey(),
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&request_tx);
-        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64);
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64 + 1);
 
         let request_spend_info = scripts::request_spend_info(
             &secp,
@@ -167,7 +167,8 @@ mod tests {
         assert_eq!(tx.input[0].witness[0].len(), 64);
         assert_eq!(tx.input[0].witness[1].len(), 32);
 
-        BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
     }
 
     #[test]
@@ -190,8 +191,8 @@ mod tests {
                 .script_pubkey(),
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&request_tx);
-        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64);
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64 + 1);
 
         let request_spend_info = scripts::request_spend_info(
             &secp, committee.pubkey, depositor.pubkey,
@@ -212,7 +213,7 @@ mod tests {
         ).unwrap();
 
         assert!(
-            BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).is_err(),
+            BITCOIN_NETWORK.broadcast_tx(&tx).is_err(),
             "wrong deposit secret should be rejected"
         );
     }
@@ -237,7 +238,8 @@ mod tests {
                 .script_pubkey(),
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
-        BITCOIN_NETWORK.confirm_tx(&request_tx);
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1);
         // Do NOT mine extra blocks — CSV should fail
 
         let request_spend_info = scripts::request_spend_info(
@@ -261,7 +263,7 @@ mod tests {
         ).unwrap();
 
         assert!(
-            BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).is_err(),
+            BITCOIN_NETWORK.broadcast_tx(&tx).is_err(),
             "CSV with insufficient sequence should be rejected"
         );
     }
