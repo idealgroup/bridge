@@ -1,0 +1,13 @@
+[package]
+name = "challenger"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bridge = { path = "../bridge" }
+lamport = { path = "../lamport" }
+bitcoin = "0.32"
+
+[dev-dependencies]
+bitcoincore-rpc = "0.19"
+rand = "0.8"

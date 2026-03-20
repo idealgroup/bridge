@@ -1,6 +1,7 @@
 use bitcoin::Amount;
 use bitcoin::blockdata::transaction::Sequence;
 
+#[derive(Clone)]
 pub struct Params {
     pub deposit_size: Amount,
     pub dust_amount: Amount,

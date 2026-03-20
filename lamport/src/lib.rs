@@ -1,3 +1,5 @@
+use std::fmt;
+
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::opcodes::all::*;
 use bitcoin::opcodes::OP_TRUE;
@@ -23,6 +25,23 @@ pub struct PublicKey(pub [[[u8; HASH_LEN]; 2]; NUM_BITS]);
 
 /// One revealed preimage per bit, selected by the message bit.
 pub struct Signature(pub [[u8; PREIMAGE_LEN]; NUM_BITS]);
+
+#[derive(Debug)]
+pub enum RecoverError {
+    PreimageMismatch { bit_index: usize },
+}
+
+impl fmt::Display for RecoverError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PreimageMismatch { bit_index } => {
+                write!(f, "preimage mismatch at bit {bit_index}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RecoverError {}
 
 fn sha256(data: &[u8]) -> [u8; HASH_LEN] {
     sha256::Hash::hash(data).to_byte_array()
@@ -73,6 +92,27 @@ impl PublicKey {
             }
         }
         true
+    }
+
+    /// Recover the signed message from revealed preimages.
+    /// For each bit: sha256(preimage) must match pk[i][0] (bit=0) or pk[i][1] (bit=1).
+    pub fn recover_message(
+        &self,
+        preimages: &[[u8; PREIMAGE_LEN]; NUM_BITS],
+    ) -> Result<[u8; MSG_LEN], RecoverError> {
+        let mut msg = [0u8; MSG_LEN];
+        for i in 0..NUM_BITS {
+            let hash = sha256(&preimages[i]);
+            if hash == self.0[i][0] {
+                // bit = 0, nothing to set
+            } else if hash == self.0[i][1] {
+                // bit = 1
+                msg[i / 8] |= 1 << (7 - (i % 8));
+            } else {
+                return Err(RecoverError::PreimageMismatch { bit_index: i });
+            }
+        }
+        Ok(msg)
     }
 
     /// Bitcoin Script that verifies a Lamport signature for bits `start..end`.
@@ -329,6 +369,33 @@ mod tests {
                 run_script_with_options(script, witness, true),
                 "chunk {chunk} (bits {start}..{end}) failed with stack limit enforced"
             );
+        }
+    }
+
+    #[test]
+    fn test_recover_message_roundtrip() {
+        let mut rng = test_rng();
+        let sk = SecretKey::random(&mut rng);
+        let pk = sk.public_key();
+        let msg = random_message(&mut rng);
+        let sig = sk.sign(&msg);
+        let recovered = pk.recover_message(&sig.0).unwrap();
+        assert_eq!(recovered, msg);
+    }
+
+    #[test]
+    fn test_recover_message_corrupted_preimage() {
+        let mut rng = test_rng();
+        let sk = SecretKey::random(&mut rng);
+        let pk = sk.public_key();
+        let msg = random_message(&mut rng);
+        let sig = sk.sign(&msg);
+        let mut preimages = sig.0;
+        preimages[42] = [0xde; PREIMAGE_LEN];
+        let result = pk.recover_message(&preimages);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            RecoverError::PreimageMismatch { bit_index } => assert_eq!(bit_index, 42),
         }
     }
 

@@ -19,6 +19,7 @@ pub enum BridgeError {
     Sighash(bitcoin::sighash::TaprootError),
     Signing(String),
     MissingData(&'static str),
+    WitnessParse(String),
     Regtest(String),
 }
 
@@ -32,6 +33,7 @@ impl fmt::Display for BridgeError {
             Self::Sighash(e) => write!(f, "sighash: {e}"),
             Self::Signing(msg) => write!(f, "signing: {msg}"),
             Self::MissingData(name) => write!(f, "missing data: {name}"),
+            Self::WitnessParse(msg) => write!(f, "witness parse: {msg}"),
             Self::Regtest(msg) => write!(f, "regtest: {msg}"),
         }
     }

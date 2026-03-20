@@ -1,8 +1,5 @@
-#[cfg(test)]
 use bitcoin::transaction::Transaction;
-#[cfg(test)]
 use bitcoin::secp256k1::{All, Secp256k1};
-#[cfg(test)]
 use crate::BridgeError;
 
 pub enum BitcoinNetworkMode {
@@ -10,12 +7,10 @@ pub enum BitcoinNetworkMode {
 }
 
 pub struct BitcoinNetwork {
-    #[allow(dead_code)]
     mode: BitcoinNetworkMode,
 }
 
-#[cfg(test)]
-pub(crate) static REGTEST_NODE: std::sync::LazyLock<crate::regtest::RegtestNode> =
+pub static REGTEST_NODE: std::sync::LazyLock<crate::regtest::RegtestNode> =
     std::sync::LazyLock::new(|| {
         let node = crate::regtest::RegtestNode::start().expect("start regtest node");
         node.mine_blocks(101).expect("mine for coinbase maturity");
@@ -28,8 +23,7 @@ impl BitcoinNetwork {
     }
 
     /// Fund a P2TR address with a real funded UTXO.
-    #[cfg(test)]
-    pub(crate) fn fund_p2tr(
+    pub fn fund_p2tr(
         &self,
         secp: &Secp256k1<All>,
         pubkey: bitcoin::key::UntweakedPublicKey,
@@ -44,8 +38,7 @@ impl BitcoinNetwork {
     }
 
     /// Mine n blocks.
-    #[cfg(test)]
-    pub(crate) fn mine_blocks(&self, n: u64) {
+    pub fn mine_blocks(&self, n: u64) {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
                 REGTEST_NODE.mine_blocks(n).expect("mine_blocks");
@@ -54,17 +47,14 @@ impl BitcoinNetwork {
     }
 
     /// Broadcast a transaction without mining.
-    #[cfg(test)]
-    pub(crate) fn broadcast_tx(&self, tx: &Transaction) -> Result<bitcoin::Txid, BridgeError> {
+    pub fn broadcast_tx(&self, tx: &Transaction) -> Result<bitcoin::Txid, BridgeError> {
         match &self.mode {
             BitcoinNetworkMode::Regtest => REGTEST_NODE.send_transaction(tx),
         }
     }
 
     /// Fetch a transaction by txid.
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn get_raw_transaction(&self, txid: &bitcoin::Txid) -> Result<Transaction, BridgeError> {
+    pub fn get_raw_transaction(&self, txid: &bitcoin::Txid) -> Result<Transaction, BridgeError> {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
                 use bitcoincore_rpc::RpcApi;
@@ -77,9 +67,7 @@ impl BitcoinNetwork {
     }
 
     /// Get a block at the given height.
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn get_block_at_height(&self, height: u64) -> Result<bitcoin::Block, BridgeError> {
+    pub fn get_block_at_height(&self, height: u64) -> Result<bitcoin::Block, BridgeError> {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
                 use bitcoincore_rpc::RpcApi;
@@ -96,9 +84,7 @@ impl BitcoinNetwork {
     }
 
     /// Get the current chain tip height.
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn get_chain_tip(&self) -> Result<u64, BridgeError> {
+    pub fn get_chain_tip(&self) -> Result<u64, BridgeError> {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
                 use bitcoincore_rpc::RpcApi;
@@ -111,9 +97,7 @@ impl BitcoinNetwork {
     }
 
     /// Fetch all blocks from `from_height` through the current tip (inclusive).
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn poll_new_blocks(&self, from_height: u64) -> Result<Vec<bitcoin::Block>, BridgeError> {
+    pub fn poll_new_blocks(&self, from_height: u64) -> Result<Vec<bitcoin::Block>, BridgeError> {
         let tip = self.get_chain_tip()?;
         let mut blocks = Vec::new();
         for h in from_height..=tip {
@@ -123,6 +107,5 @@ impl BitcoinNetwork {
     }
 }
 
-#[cfg(test)]
-pub(crate) static BITCOIN_NETWORK: std::sync::LazyLock<BitcoinNetwork> =
+pub static BITCOIN_NETWORK: std::sync::LazyLock<BitcoinNetwork> =
     std::sync::LazyLock::new(|| BitcoinNetwork::new(BitcoinNetworkMode::Regtest));
