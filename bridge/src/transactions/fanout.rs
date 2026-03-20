@@ -185,7 +185,7 @@ fn build_leaf_tx(
 
     let mut outputs = Vec::new();
     for slot in slots_start..slots_end {
-        let lamport_pk = operator.lamport_pubkey(slot);
+        let lamport_pk = operator.lamport_pubkey(slot)?;
         for chunk in 0..params.lamport_chunks_per_slot {
             let (start, end) = params.lamport_chunk_range(chunk);
             let spend_info = scripts::fanout_leaf_spend_info(

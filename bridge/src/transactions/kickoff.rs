@@ -193,7 +193,7 @@ mod tests {
 
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
-        let lamport_pk = operator.lamport_pubkey(slot);
+        let lamport_pk = operator.lamport_pubkey(slot).unwrap();
 
         let prevouts = tree.kickoff_prevouts(&params, slot);
 
@@ -260,7 +260,7 @@ mod tests {
         // Sign with a DIFFERENT slot's Lamport key (preimages won't match slot 0's pubkey)
         let msg = [0xbb; lamport::MSG_LEN];
         let wrong_lamport_sig = operator.lamport_keys[1].sign(&msg);
-        let correct_lamport_pk = operator.lamport_pubkey(slot);
+        let correct_lamport_pk = operator.lamport_pubkey(slot).unwrap();
 
         let prevouts = tree.kickoff_prevouts(&params, slot);
 

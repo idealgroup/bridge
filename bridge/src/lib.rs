@@ -19,7 +19,7 @@ pub enum BridgeError {
     TaprootBuilder(String),
     Sighash(bitcoin::sighash::TaprootError),
     Signing(String),
-    MissingUtxo(&'static str),
+    MissingData(&'static str),
     ScriptExecution(String),
     #[cfg(feature = "regtest")]
     Regtest(String),
@@ -34,7 +34,7 @@ impl fmt::Display for BridgeError {
             Self::TaprootBuilder(msg) => write!(f, "taproot builder: {msg}"),
             Self::Sighash(e) => write!(f, "sighash: {e}"),
             Self::Signing(msg) => write!(f, "signing: {msg}"),
-            Self::MissingUtxo(name) => write!(f, "missing utxo: {name}"),
+            Self::MissingData(name) => write!(f, "missing data: {name}"),
             Self::ScriptExecution(msg) => write!(f, "script execution: {msg}"),
             #[cfg(feature = "regtest")]
             Self::Regtest(msg) => write!(f, "regtest: {msg}"),

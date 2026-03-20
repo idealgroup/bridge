@@ -42,6 +42,7 @@ pub fn build_cancel_tx(
 }
 
 /// Signs the cancel transaction (depositor script-path on request output).
+#[allow(clippy::too_many_arguments)]
 pub fn sign_cancel_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     tx: &mut Transaction,

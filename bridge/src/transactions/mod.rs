@@ -140,7 +140,7 @@ mod flow_tests {
 
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
-        let lamport_pk = operator.lamport_pubkey(slot);
+        let lamport_pk = operator.lamport_pubkey(slot).unwrap();
 
         kickoff::sign_kickoff_tx(
             &secp, &mut kickoff_tx, &operator.keypair,
@@ -184,7 +184,7 @@ mod flow_tests {
         let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
-        let lamport_pk = operator.lamport_pubkey(slot);
+        let lamport_pk = operator.lamport_pubkey(slot).unwrap();
         kickoff::sign_kickoff_tx(
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
@@ -237,7 +237,7 @@ mod flow_tests {
         let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
-        let lamport_pk = operator.lamport_pubkey(slot);
+        let lamport_pk = operator.lamport_pubkey(slot).unwrap();
         kickoff::sign_kickoff_tx(
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,

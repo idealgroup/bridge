@@ -12,7 +12,7 @@ use crate::BridgeError;
 /// - Output: OP_RETURN (burns the connector)
 pub fn build_disprove_tx(kickoff_txid: Txid) -> Transaction {
     // Pad OP_RETURN to meet MIN_STANDARD_TX_NONWITNESS_SIZE (65 bytes).
-    let op_return = ScriptBuf::new_op_return(&[0u8; 4]);
+    let op_return = ScriptBuf::new_op_return([0u8; 4]);
 
     Transaction {
         version: Version::TWO,
@@ -108,7 +108,7 @@ mod tests {
         let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
-        let lamport_pk = operator.lamport_pubkey(slot);
+        let lamport_pk = operator.lamport_pubkey(slot).unwrap();
         kickoff::sign_kickoff_tx(
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
@@ -168,7 +168,7 @@ mod tests {
         let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
-        let lamport_pk = operator.lamport_pubkey(slot);
+        let lamport_pk = operator.lamport_pubkey(slot).unwrap();
         kickoff::sign_kickoff_tx(
             &secp, &mut kickoff_tx, &operator.keypair,
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,

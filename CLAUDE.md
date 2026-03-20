@@ -44,6 +44,7 @@ Each `kickoffTx` consumes one triple of fanout leaf UTXOs (3 inputs), forcing th
 - **Committee** (n-of-n): presigns deposit and withdraw transactions. Static signer set. Must be online for new deposits.
 - **Operators** (`1..n`): front withdrawals, post proofs, claim deposits after timeout. Not involved in deposit presigning.
 - **Depositors** (`1..DEPOSIT_COUNT`): lock BTC, receive wBTC on Ethereum.
+- **Challengers** (permissionless): verify proofs, submit disprove transactions if fraud detected.
 
 ### Presigning Model
 
@@ -91,7 +92,7 @@ ideal-bridge/
 │   └── src/
 │       ├── lib.rs
 │       ├── params.rs           # configurable constants
-│       ├── actor.rs            # Operator, Depositor, Committee key material
+│       ├── actor.rs            # Actor types (Operator, Depositor, Committee, Challenger) with key material and transaction orchestration
 │       ├── engine.rs           # BitVMEngine trait
 │       ├── transactions/       # one module per tx type
 │       │   ├── mod.rs          # + flow_tests (end-to-end integration tests)

@@ -13,6 +13,7 @@
           buildInputs = [
             pkgs.rustc
             pkgs.cargo
+            pkgs.clippy
             pkgs.pkg-config
             pkgs.openssl
             pkgs.bitcoind
