@@ -327,36 +327,4 @@ mod tests {
         assert_eq!(op.vout, 0);
     }
 
-    #[test]
-    #[cfg_attr(feature = "regtest", ignore)]
-    fn test_fanout_wrong_key_rejected() {
-        let secp = Secp256k1::new();
-        let mut rng = test_rng();
-        let params = Params::test_defaults();
-        let init_utxo = OutPoint::new(Txid::all_zeros(), 0);
-        let operator_a = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
-
-        let mut tree = build_fanout_tree(&secp, &operator_a, &params).unwrap();
-        let init_txout = TxOut {
-            value: params.fanout_init_value(),
-            script_pubkey: Address::p2tr(&secp, operator_a.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
-        };
-        sign_fanout_tree(&secp, &mut tree, &operator_a.keypair, &init_txout, &params).unwrap();
-
-        // Construct prevout with a different operator's pubkey
-        let init_utxo_b = OutPoint::new(Txid::all_zeros(), 1);
-        let operator_b = Operator::new(&mut rng, &secp, init_utxo_b, params.deposit_count);
-        let wrong_prevout = TxOut {
-            value: params.fanout_init_value(),
-            script_pubkey: Address::p2tr(&secp, operator_b.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
-        };
-
-        use crate::network::BITCOIN_NETWORK;
-        assert!(
-            BITCOIN_NETWORK.verify_input(&tree.levels[0][0], 0, &[wrong_prevout]).is_err(),
-            "key-spend with wrong key should be rejected"
-        );
-    }
 }

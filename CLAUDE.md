@@ -72,7 +72,7 @@ All `SIGHASH_ALL` — every tx is fully determined at sign time. The `kickoffTx`
 | BitVM engine | Trait (black box) | GC/SNARK verification out of scope; mock in tests |
 | Ethereum interaction | Typed events | No Ethereum deps; clean integration boundary |
 | Committee signing | Direct signing functions | `presign_deposit_tx()` / `presign_withdraw_input0()`; MuSig2 aggregation deferred to CLI/server layer |
-| Script execution | `BitcoinNetwork` enum | `ScriptExec` mode (bitcoin-scriptexec) for unit tests, `Regtest` mode (live bitcoind) for integration |
+| Script execution | `BitcoinNetwork` enum | All verification through live bitcoind (`Regtest` mode). Chain monitoring via `broadcast_tx`, `get_raw_transaction`, `get_block_at_height`, `get_chain_tip`, `poll_new_blocks`. |
 | Anchor outputs | P2A on `kickoffTx` + `withdrawTx` | Presigned txs need CPFP fee bumping |
 | Dust outputs | `DUST_AMOUNT` = 546 sats | For non-value-bearing outputs (fanout, connector, disprove) |
 | Timelocks | Relative (`OP_CSV` + `nSequence`) | `cancelTx` uses `OP_CSV` in script; `withdrawTx` connector timelock enforced by `nSequence` committed in committee's presigned input0 |
@@ -104,8 +104,8 @@ ideal-bridge/
 │       │   ├── deposit.rs
 │       │   └── withdraw.rs
 │       ├── scripts.rs          # spending condition script builders + P2A helper
-│       ├── network.rs          # BitcoinNetwork: ScriptExec / Regtest dispatch
-│       └── regtest.rs          # bitcoind regtest node management (behind `regtest` feature)
+│       ├── network.rs          # BitcoinNetwork: Regtest dispatch + chain monitoring
+│       └── regtest.rs          # bitcoind regtest node management
 ```
 
 ## Build Order
@@ -115,7 +115,7 @@ ideal-bridge/
 3. `engine` — BitVMEngine trait + mock
 4. `scripts` — spending condition script builders
 5. `transactions/` — one at a time: fanout -> kickoff -> disprove -> request -> cancel -> deposit -> withdraw
-6. `network` + `regtest` — test infrastructure (ScriptExec + live bitcoind)
+6. `network` + `regtest` — test infrastructure (live bitcoind) + chain monitoring
 7. Flow tests in `transactions/mod.rs` — end-to-end deposit + withdrawal cycles
 
 ## Parameters (defaults)

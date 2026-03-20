@@ -2,7 +2,6 @@ pub mod actor;
 pub mod engine;
 pub mod network;
 pub mod params;
-#[cfg(feature = "regtest")]
 pub mod regtest;
 pub mod scripts;
 pub mod transactions;
@@ -20,8 +19,6 @@ pub enum BridgeError {
     Sighash(bitcoin::sighash::TaprootError),
     Signing(String),
     MissingData(&'static str),
-    ScriptExecution(String),
-    #[cfg(feature = "regtest")]
     Regtest(String),
 }
 
@@ -35,8 +32,6 @@ impl fmt::Display for BridgeError {
             Self::Sighash(e) => write!(f, "sighash: {e}"),
             Self::Signing(msg) => write!(f, "signing: {msg}"),
             Self::MissingData(name) => write!(f, "missing data: {name}"),
-            Self::ScriptExecution(msg) => write!(f, "script execution: {msg}"),
-            #[cfg(feature = "regtest")]
             Self::Regtest(msg) => write!(f, "regtest: {msg}"),
         }
     }
