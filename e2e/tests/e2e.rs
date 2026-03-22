@@ -72,10 +72,7 @@ fn test_happy_path_deposit_and_withdraw() {
     // === 3. Depositor stores presigned deposit ===
     dep_client.receive_presigned_deposit(deposit_tx.clone());
 
-    // === 4. Operator creates fanout tree (signed, not broadcast) ===
-    op_client.create_fanout_tree().unwrap();
-
-    // === 5. Compute deterministic kickoff txid ===
+    // === 4. Compute deterministic kickoff txid (lazily builds fanout tree) ===
     let slot = 0;
     let disprove_hash = [0xaa; 32];
     let kickoff_txid = op_client.kickoff_txid(slot, disprove_hash).unwrap();
@@ -240,10 +237,7 @@ fn test_fraud_proof_disprove() {
     network.mine_blocks(1).unwrap();
     let deposit_txid = deposit_tx.compute_txid();
 
-    // === 3. Operator creates fanout tree (signed, not broadcast) ===
-    op_client.create_fanout_tree().unwrap();
-
-    // === 4. Prepare invalid proof and compute disprove hash ===
+    // === 3. Prepare invalid proof and compute disprove hash ===
     // MockEngine: proof[0] != 0x00 is invalid, disprove_secret = proof[0..20]
     let mut invalid_proof = [0u8; lamport::MSG_LEN];
     invalid_proof[0] = 0xFF;

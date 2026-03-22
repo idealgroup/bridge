@@ -22,38 +22,54 @@ impl OperatorClient {
         }
     }
 
-    /// Build and sign the full fanout tree (does not broadcast).
-    pub fn create_fanout_tree(&mut self) -> Result<(), BridgeError> {
-        let init_txout = TxOut {
-            value: self.params.fanout_init_value(),
-            script_pubkey: Address::p2tr(&self.secp, self.operator.pubkey, None, Network::Bitcoin)
+    /// Ensure the fanout tree is built and signed. No-op if already present.
+    fn ensure_fanout_tree(&mut self) -> Result<(), BridgeError> {
+        if self.operator.fanout_tree.is_none() {
+            let init_txout = TxOut {
+                value: self.params.fanout_init_value(),
+                script_pubkey: Address::p2tr(
+                    &self.secp,
+                    self.operator.pubkey,
+                    None,
+                    Network::Bitcoin,
+                )
                 .script_pubkey(),
-        };
-        self.operator
-            .create_fanout_tree(&self.secp, &init_txout, &self.params)?;
+            };
+            self.operator
+                .create_fanout_tree(&self.secp, &init_txout, &self.params)?;
+        }
         Ok(())
     }
 
+    /// Build and sign the full fanout tree (does not broadcast). No-op if already present.
+    pub fn create_fanout_tree(&mut self) -> Result<(), BridgeError> {
+        self.ensure_fanout_tree()
+    }
+
     /// Compute the deterministic kickoff txid for a given slot.
+    /// Lazily builds the fanout tree if not already present.
     pub fn kickoff_txid(
-        &self,
+        &mut self,
         slot: usize,
         disprove_secret_hash: [u8; 32],
     ) -> Result<Txid, BridgeError> {
+        self.ensure_fanout_tree()?;
         self.operator
             .kickoff_txid(&self.secp, slot, disprove_secret_hash, &self.params)
     }
 
     /// Build and sign a kickoff tx for a deposit slot.
+    /// Lazily builds the fanout tree if not already present.
     ///
     /// Returns the fanout path txs (root to leaf) followed by the kickoff tx.
     /// Caller should broadcast all in order and then mine.
     pub fn create_kickoff(
-        &self,
+        &mut self,
         slot: usize,
         disprove_secret_hash: [u8; 32],
         proof: &[u8; lamport::MSG_LEN],
     ) -> Result<Vec<Transaction>, BridgeError> {
+        self.ensure_fanout_tree()?;
         let tree = self
             .operator
             .fanout_tree

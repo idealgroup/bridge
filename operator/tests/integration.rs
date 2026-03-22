@@ -24,11 +24,7 @@ fn test_operator_creates_fanout_and_kickoff() {
 
     let mut client = OperatorClient::new(operator, params.clone());
 
-    // Build and sign fanout tree (no broadcast)
-    client.create_fanout_tree().unwrap();
-    assert!(client.operator.fanout_tree.is_some());
-
-    // Create kickoff for slot 0 — returns fanout path + kickoff
+    // Create kickoff for slot 0 — lazily builds fanout tree, returns fanout path + kickoff
     let slot = 0;
     let disprove_hash = [0xaa; 32];
     let proof_msg = [0xbb; lamport::MSG_LEN];
@@ -88,10 +84,7 @@ fn test_operator_completes_withdraw() {
     BITCOIN_NETWORK.mine_blocks(1).unwrap();
     let deposit_txid = deposit_tx.compute_txid();
 
-    // --- Operator creates fanout tree (signed, not broadcast) ---
-    client.create_fanout_tree().unwrap();
-
-    // --- Deterministic kickoff txid (operator computes, shares with committee) ---
+    // --- Deterministic kickoff txid (lazily builds fanout tree) ---
     let slot = 0;
     let disprove_hash = [0xaa; 32];
     let kickoff_txid = client.kickoff_txid(slot, disprove_hash).unwrap();
