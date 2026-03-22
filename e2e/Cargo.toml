@@ -1,0 +1,13 @@
+[package]
+name = "e2e"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bridge = { path = "../bridge" }
+operator = { path = "../operator" }
+depositor = { path = "../depositor" }
+challenger = { path = "../challenger" }
+lamport = { path = "../lamport" }
+bitcoin = "0.32"
+rand = "0.8"
