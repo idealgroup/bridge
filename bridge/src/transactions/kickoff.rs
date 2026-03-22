@@ -236,7 +236,7 @@ pub fn sign_kickoff_tx(
 
         let leaf_script = scripts::fanout_leaf_script(
             operator_pubkey, lamport_pk, start, end,
-        );
+        )?;
         let leaf_hash = bitcoin::taproot::TapLeafHash::from_script(
             &leaf_script, LeafVersion::TapScript,
         );
@@ -261,7 +261,9 @@ pub fn sign_kickoff_tx(
 
         let mut witness = Witness::new();
         // Lamport preimages (reversed order for script processing)
-        let preimages = lamport_sig.witness_data_for_range(start, end);
+        let preimages = lamport_sig
+            .witness_data_for_range(start, end)
+            .map_err(|e| BridgeError::Signing(format!("lamport: {e}")))?;
         for preimage in &preimages {
             witness.push(preimage);
         }
@@ -287,7 +289,6 @@ mod tests {
     use crate::actor::Operator;
     use crate::params::Params;
     use crate::transactions::fanout;
-    use bitcoin::hashes::Hash;
     use bitcoin::{OutPoint, Txid};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -318,7 +319,7 @@ mod tests {
         use crate::network::BITCOIN_NETWORK;
 
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
@@ -334,7 +335,7 @@ mod tests {
                 BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let slot = 0;
         let disprove_hash = [0xaa; 32];
@@ -360,7 +361,7 @@ mod tests {
         }
 
         BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
     }
 
     #[test]
@@ -372,7 +373,7 @@ mod tests {
         use crate::network::BITCOIN_NETWORK;
 
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
@@ -387,7 +388,7 @@ mod tests {
                 BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let slot = 0;
         let disprove_hash = [0xaa; 32];
@@ -405,7 +406,7 @@ mod tests {
         ).unwrap();
 
         BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         // Extract proof from the signed kickoff tx
         let data = extract_proof_from_kickoff(&tx, &params).unwrap();
@@ -436,7 +437,7 @@ mod tests {
         use crate::network::BITCOIN_NETWORK;
 
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
@@ -451,7 +452,7 @@ mod tests {
                 BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let slot = 0;
         let disprove_hash = [0xaa; 32];

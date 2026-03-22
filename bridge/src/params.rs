@@ -53,6 +53,29 @@ impl Params {
         }
     }
 
+    /// Validate that derived parameters are consistent.
+    pub fn validate(&self) -> Result<(), crate::BridgeError> {
+        let total_bits = self.proof_size * 8;
+        let expected_chunks =
+            total_bits.div_ceil(lamport::MAX_BITS_PER_CHUNK);
+        if self.lamport_chunks_per_slot != expected_chunks {
+            return Err(crate::BridgeError::InvalidParams(format!(
+                "lamport_chunks_per_slot is {} but proof_size {} requires {}",
+                self.lamport_chunks_per_slot, self.proof_size, expected_chunks,
+            )));
+        }
+        // Each leaf tx handles `branching` slots, and there are branching^(depth-1)
+        // leaf txs, so total capacity = branching^depth.
+        let capacity = self.fanout_branching.pow(self.fanout_depth as u32);
+        if capacity < self.deposit_count {
+            return Err(crate::BridgeError::InvalidParams(format!(
+                "fanout_branching^fanout_depth = {} < deposit_count {}",
+                capacity, self.deposit_count,
+            )));
+        }
+        Ok(())
+    }
+
     /// Returns the (start_bit, end_bit) range for a given Lamport chunk index.
     pub fn lamport_chunk_range(&self, chunk: usize) -> (usize, usize) {
         let total_bits = self.proof_size * 8;
@@ -105,5 +128,25 @@ mod tests {
         assert_eq!(p.deposit_count, 4);
         assert_eq!(p.fanout_branching, 2);
         assert_eq!(p.fanout_depth, 2);
+    }
+
+    #[test]
+    fn test_validate_defaults() {
+        Params::default().validate().unwrap();
+        Params::test_defaults().validate().unwrap();
+    }
+
+    #[test]
+    fn test_validate_wrong_chunks() {
+        let mut p = Params::test_defaults();
+        p.lamport_chunks_per_slot = 5;
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_insufficient_fanout() {
+        let mut p = Params::test_defaults();
+        p.fanout_depth = 1; // branching^0 = 1 < deposit_count=4
+        assert!(p.validate().is_err());
     }
 }

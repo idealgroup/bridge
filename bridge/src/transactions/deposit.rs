@@ -66,7 +66,6 @@ mod tests {
     use super::*;
     use crate::actor::Depositor;
     use crate::scripts;
-    use bitcoin::hashes::Hash;
     use bitcoin::OutPoint;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -96,7 +95,7 @@ mod tests {
         use crate::transactions::request;
 
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size);
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
         // Build and confirm request_tx (parent of deposit)
@@ -108,7 +107,7 @@ mod tests {
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let request_spend_info = scripts::request_spend_info(
             &secp,
@@ -130,6 +129,6 @@ mod tests {
         assert_eq!(tx.input[0].witness[0].len(), 64);
 
         BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
     }
 }

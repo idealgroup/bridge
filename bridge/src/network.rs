@@ -28,20 +28,20 @@ impl BitcoinNetwork {
         secp: &Secp256k1<All>,
         pubkey: bitcoin::key::UntweakedPublicKey,
         amount: bitcoin::Amount,
-    ) -> bitcoin::OutPoint {
+    ) -> Result<bitcoin::OutPoint, BridgeError> {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
                 let addr = bitcoin::Address::p2tr(secp, pubkey, None, bitcoin::Network::Regtest);
-                REGTEST_NODE.fund_address(&addr, amount).expect("fund_p2tr")
+                REGTEST_NODE.fund_address(&addr, amount)
             }
         }
     }
 
     /// Mine n blocks.
-    pub fn mine_blocks(&self, n: u64) {
+    pub fn mine_blocks(&self, n: u64) -> Result<(), BridgeError> {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
-                REGTEST_NODE.mine_blocks(n).expect("mine_blocks");
+                REGTEST_NODE.mine_blocks(n)
             }
         }
     }

@@ -21,6 +21,7 @@ pub enum BridgeError {
     MissingData(&'static str),
     WitnessParse(String),
     Regtest(String),
+    InvalidParams(String),
 }
 
 impl fmt::Display for BridgeError {
@@ -35,6 +36,7 @@ impl fmt::Display for BridgeError {
             Self::MissingData(name) => write!(f, "missing data: {name}"),
             Self::WitnessParse(msg) => write!(f, "witness parse: {msg}"),
             Self::Regtest(msg) => write!(f, "regtest: {msg}"),
+            Self::InvalidParams(msg) => write!(f, "invalid params: {msg}"),
         }
     }
 }

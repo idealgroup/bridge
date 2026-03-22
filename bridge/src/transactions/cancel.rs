@@ -90,7 +90,6 @@ pub fn sign_cancel_tx(
 mod tests {
     use super::*;
     use crate::actor::Committee;
-    use bitcoin::hashes::Hash;
     use bitcoin::OutPoint;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -126,7 +125,7 @@ mod tests {
         use crate::transactions::request;
 
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size);
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
         // Build and sign request_tx (parent)
@@ -138,7 +137,7 @@ mod tests {
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64 + 1);
+        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64 + 1).unwrap();
 
         let request_spend_info = scripts::request_spend_info(
             &secp,
@@ -168,7 +167,7 @@ mod tests {
         assert_eq!(tx.input[0].witness[1].len(), 32);
 
         BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
     }
 
     #[test]
@@ -181,7 +180,7 @@ mod tests {
         use crate::transactions::request;
 
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size);
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
         let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
@@ -192,7 +191,7 @@ mod tests {
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64 + 1);
+        BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64 + 1).unwrap();
 
         let request_spend_info = scripts::request_spend_info(
             &secp, committee.pubkey, depositor.pubkey,
@@ -228,7 +227,7 @@ mod tests {
         use crate::transactions::request;
 
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size);
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
         let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
@@ -239,7 +238,7 @@ mod tests {
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
         // Do NOT mine extra blocks — CSV should fail
 
         let request_spend_info = scripts::request_spend_info(

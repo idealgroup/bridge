@@ -83,7 +83,7 @@ mod tests {
         use crate::transactions::{fanout, kickoff};
 
         let mut operator = Operator::new(&mut rng, &secp, bitcoin::OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
@@ -97,7 +97,7 @@ mod tests {
                 BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let slot = 0;
         let secret = [0xab; 20];
@@ -115,7 +115,7 @@ mod tests {
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let kickoff_txid = kickoff_tx.compute_txid();
         let spend_info = scripts::connector_spend_info(
@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(tx.input[0].witness[0], secret);
 
         BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
     }
 
     #[test]
@@ -143,7 +143,7 @@ mod tests {
         use crate::transactions::{fanout, kickoff};
 
         let mut operator = Operator::new(&mut rng, &secp, bitcoin::OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
@@ -157,7 +157,7 @@ mod tests {
                 BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let slot = 0;
         let secret = [0xab; 20];
@@ -175,7 +175,7 @@ mod tests {
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let kickoff_txid = kickoff_tx.compute_txid();
         let spend_info = scripts::connector_spend_info(

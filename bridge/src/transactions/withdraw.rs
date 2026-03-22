@@ -116,7 +116,7 @@ pub fn sign_withdraw_input1(
 mod tests {
     use super::*;
     use crate::actor::Committee;
-    use bitcoin::hashes::{sha256, Hash};
+    use bitcoin::hashes::sha256;
     use bitcoin::OutPoint;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -165,7 +165,7 @@ mod tests {
         let request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, {
             let dep_tmp = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
             dep_tmp.pubkey
-        }, params.deposit_size);
+        }, params.deposit_size).unwrap();
 
         let mut rng = StdRng::seed_from_u64(42);
         let depositor = Depositor::new(&mut rng, &secp, 0, request_utxo);
@@ -173,7 +173,7 @@ mod tests {
 
         // Fund operator, then update its init_utxo to the real outpoint
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         // Build request → deposit chain
         let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
@@ -183,7 +183,7 @@ mod tests {
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let request_txid = request_tx.compute_txid();
         let request_spend_info = scripts::request_spend_info(
@@ -196,7 +196,7 @@ mod tests {
             &request_spend_info, &[request_tx.output[0].clone()],
         ).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         // Build fanout → kickoff chain
         let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
@@ -210,7 +210,7 @@ mod tests {
                 BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let slot = 0;
         let disprove_hash = [0xaa; 32];
@@ -226,7 +226,7 @@ mod tests {
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
+        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64).unwrap();
 
         // Build withdraw tx
         let deposit_txid = deposit_tx.compute_txid();
@@ -251,7 +251,7 @@ mod tests {
         ).unwrap();
 
         BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
     }
 
     #[test]
@@ -268,7 +268,7 @@ mod tests {
         let request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, {
             let dep_tmp = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
             dep_tmp.pubkey
-        }, params.deposit_size);
+        }, params.deposit_size).unwrap();
 
         let mut rng = StdRng::seed_from_u64(42);
         let depositor = Depositor::new(&mut rng, &secp, 0, request_utxo);
@@ -276,7 +276,7 @@ mod tests {
 
         // Fund operator, then update its init_utxo to the real outpoint
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         // Build request → deposit chain
         let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
@@ -286,7 +286,7 @@ mod tests {
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let request_txid = request_tx.compute_txid();
         let request_spend_info = scripts::request_spend_info(
@@ -299,7 +299,7 @@ mod tests {
             &request_spend_info, &[request_tx.output[0].clone()],
         ).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         // Build and confirm fanout tree
         let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
@@ -313,7 +313,7 @@ mod tests {
                 BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         // Build and confirm kickoff
         let slot = 0;
@@ -330,7 +330,7 @@ mod tests {
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
+        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64).unwrap();
 
         let connector_info = scripts::connector_spend_info(
             &secp, operator.pubkey, disprove_hash,
@@ -358,7 +358,7 @@ mod tests {
         assert_eq!(tx.input[1].witness[0].len(), 64);
 
         BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
     }
 
     #[test]
@@ -371,7 +371,7 @@ mod tests {
         use crate::transactions::{fanout, kickoff};
 
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
         let wrong_operator = Operator::new(
             &mut rng, &secp, OutPoint::new(Txid::all_zeros(), 1), params.deposit_count,
@@ -388,7 +388,7 @@ mod tests {
                 BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
         let slot = 0;
         let disprove_hash = sha256::Hash::hash(&[0xab; 20]).to_byte_array();
@@ -404,7 +404,7 @@ mod tests {
             &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
         ).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64);
+        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64).unwrap();
 
         let connector_info = scripts::connector_spend_info(
             &secp, operator.pubkey, disprove_hash,

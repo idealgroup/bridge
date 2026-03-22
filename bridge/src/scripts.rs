@@ -72,7 +72,9 @@ pub fn fanout_leaf_spend_info(
     chunk_start: usize,
     chunk_end: usize,
 ) -> Result<TaprootSpendInfo, BridgeError> {
-    let lamport_script = lamport_pk.verification_script_for_range(chunk_start, chunk_end);
+    let lamport_script = lamport_pk
+        .verification_script_for_range(chunk_start, chunk_end)
+        .map_err(|e| BridgeError::Signing(format!("lamport: {e}")))?;
 
     let script = Builder::new()
         .push_x_only_key(&operator_pubkey)
@@ -146,13 +148,15 @@ pub fn fanout_leaf_script(
     lamport_pk: &lamport::PublicKey,
     chunk_start: usize,
     chunk_end: usize,
-) -> ScriptBuf {
-    let lamport_script = lamport_pk.verification_script_for_range(chunk_start, chunk_end);
+) -> Result<ScriptBuf, BridgeError> {
+    let lamport_script = lamport_pk
+        .verification_script_for_range(chunk_start, chunk_end)
+        .map_err(|e| BridgeError::Signing(format!("lamport: {e}")))?;
     let prefix = Builder::new()
         .push_x_only_key(&operator_pubkey)
         .push_opcode(OP_CHECKSIGVERIFY)
         .into_script();
-    ScriptBuf::from([prefix.as_bytes(), lamport_script.as_bytes()].concat())
+    Ok(ScriptBuf::from([prefix.as_bytes(), lamport_script.as_bytes()].concat()))
 }
 
 #[cfg(test)]

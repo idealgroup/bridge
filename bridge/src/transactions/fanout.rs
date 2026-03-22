@@ -221,7 +221,6 @@ mod tests {
     use super::*;
     use crate::actor::Operator;
     use crate::params::Params;
-    use bitcoin::hashes::Hash;
     use bitcoin::Txid;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -263,7 +262,7 @@ mod tests {
         use crate::network::BITCOIN_NETWORK;
 
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         let mut tree = build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
@@ -288,7 +287,7 @@ mod tests {
                 BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
-        BITCOIN_NETWORK.mine_blocks(1);
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
     }
 
     #[test]
