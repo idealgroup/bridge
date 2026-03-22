@@ -6,7 +6,9 @@ use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
 use bitcoin::{ScriptBuf, Witness};
 
-use crate::actor::{Committee, Depositor};
+use bitcoin::key::UntweakedPublicKey as XOnlyPublicKey;
+
+use crate::actor::Depositor;
 use crate::params::Params;
 use crate::scripts;
 use crate::BridgeError;
@@ -18,12 +20,12 @@ use crate::BridgeError;
 pub fn build_request_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     depositor: &Depositor,
-    committee: &Committee,
+    committee_pubkey: XOnlyPublicKey,
     params: &Params,
 ) -> Result<Transaction, BridgeError> {
     let spend_info = scripts::request_spend_info(
         secp,
-        committee.pubkey,
+        committee_pubkey,
         depositor.pubkey,
         depositor.deposit_secret_hash(),
         params.deposit_timeout,
@@ -41,7 +43,7 @@ pub fn build_request_tx(
             witness: Witness::new(),
         }],
         output: vec![TxOut {
-            value: params.deposit_size,
+            value: params.deposit_size + scripts::P2A_DUST,
             script_pubkey,
         }],
     })
@@ -90,10 +92,10 @@ mod tests {
         );
         let committee = Committee::new(&mut rng, &secp);
 
-        let tx = build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let tx = build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         assert_eq!(tx.input.len(), 1);
         assert_eq!(tx.output.len(), 1);
-        assert_eq!(tx.output[0].value, params.deposit_size);
+        assert_eq!(tx.output[0].value, params.request_input_value());
     }
 
     #[test]
@@ -104,12 +106,12 @@ mod tests {
 
         use crate::network::BITCOIN_NETWORK;
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let mut tx = build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let mut tx = build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         let prevouts = [TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey: Address::p2tr(&secp, depositor.pubkey, None, Network::Bitcoin)
                 .script_pubkey(),
         }];

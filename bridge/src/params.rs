@@ -108,6 +108,12 @@ impl Params {
     pub fn fanout_init_value(&self) -> Amount {
         Amount::from_sat(self.fanout_branching as u64 * self.fanout_output_value(0).to_sat())
     }
+
+    /// Value the depositor must fund into their request UTXO.
+    /// Covers `deposit_size` plus the P2A anchor on the deposit tx.
+    pub fn request_input_value(&self) -> Amount {
+        self.deposit_size + crate::scripts::P2A_DUST
+    }
 }
 
 #[cfg(test)]

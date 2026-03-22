@@ -64,7 +64,7 @@ fn test_operator_completes_withdraw() {
     // === Depositor setup (independent actor) ===
     let mut depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
     depositor.request_utxo =
-        BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
+        BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
 
     // === Committee setup (independent actor) ===
     let committee = Committee::new(&mut rng, &secp);
@@ -77,7 +77,7 @@ fn test_operator_completes_withdraw() {
 
     // --- Depositor creates request (on-chain) ---
     let request_tx = depositor
-        .create_request(&secp, &committee, &params)
+        .create_request(&secp, committee.pubkey, &params)
         .unwrap();
     BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
     BITCOIN_NETWORK.mine_blocks(1).unwrap();

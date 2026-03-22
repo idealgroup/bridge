@@ -125,13 +125,13 @@ mod tests {
         use crate::transactions::request;
 
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
         // Build and sign request_tx (parent)
-        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let mut request_tx = request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         let depositor_prevout = TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
                 .script_pubkey(),
         };
@@ -180,12 +180,12 @@ mod tests {
         use crate::transactions::request;
 
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let mut request_tx = request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         let depositor_prevout = TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
                 .script_pubkey(),
         };
@@ -227,12 +227,12 @@ mod tests {
         use crate::transactions::request;
 
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let mut request_tx = request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         let depositor_prevout = TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
                 .script_pubkey(),
         };

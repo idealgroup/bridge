@@ -217,12 +217,12 @@ impl Depositor {
     pub fn create_request(
         &self,
         secp: &Secp256k1<bitcoin::secp256k1::All>,
-        committee: &Committee,
+        committee_pubkey: XOnlyPublicKey,
         params: &Params,
     ) -> Result<Transaction, BridgeError> {
-        let mut tx = request::build_request_tx(secp, self, committee, params)?;
+        let mut tx = request::build_request_tx(secp, self, committee_pubkey, params)?;
         let prevout = TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey: Address::p2tr(secp, self.pubkey, None, Network::Bitcoin)
                 .script_pubkey(),
         };
@@ -234,14 +234,14 @@ impl Depositor {
     pub fn create_cancel(
         &self,
         secp: &Secp256k1<bitcoin::secp256k1::All>,
-        committee: &Committee,
+        committee_pubkey: XOnlyPublicKey,
         request_txid: Txid,
         request_prevout: &TxOut,
         params: &Params,
     ) -> Result<Transaction, BridgeError> {
         let request_spend_info = scripts::request_spend_info(
             secp,
-            committee.pubkey,
+            committee_pubkey,
             self.pubkey,
             self.deposit_secret_hash(),
             params.deposit_timeout,
@@ -442,11 +442,11 @@ mod tests {
 
         let mut depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
         depositor.request_utxo =
-            BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
+            BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
         // Depositor creates request
-        let request_tx = depositor.create_request(&secp, &committee, &params).unwrap();
+        let request_tx = depositor.create_request(&secp, committee.pubkey, &params).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
         BITCOIN_NETWORK.mine_blocks(1).unwrap();
         let request_txid = request_tx.compute_txid();
@@ -478,10 +478,10 @@ mod tests {
 
         let mut depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
         depositor.request_utxo =
-            BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
+            BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let request_tx = depositor.create_request(&secp, &committee, &params).unwrap();
+        let request_tx = depositor.create_request(&secp, committee.pubkey, &params).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
         BITCOIN_NETWORK.mine_blocks(params.deposit_timeout.to_consensus_u32() as u64 + 1).unwrap();
         let request_txid = request_tx.compute_txid();
@@ -489,7 +489,7 @@ mod tests {
         let cancel_tx = depositor
             .create_cancel(
                 &secp,
-                &committee,
+                committee.pubkey,
                 request_txid,
                 &request_tx.output[0],
                 &params,
@@ -549,11 +549,11 @@ mod tests {
         // 1. Setup depositor + committee
         let mut depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
         depositor.request_utxo =
-            BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
+            BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
         // 2. Request → deposit chain
-        let request_tx = depositor.create_request(&secp, &committee, &params).unwrap();
+        let request_tx = depositor.create_request(&secp, committee.pubkey, &params).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
         BITCOIN_NETWORK.mine_blocks(1).unwrap();
         let request_txid = request_tx.compute_txid();

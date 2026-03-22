@@ -9,12 +9,14 @@ use bitcoin::{Address, Network, ScriptBuf, Txid, Witness};
 
 use crate::actor::Committee;
 use crate::params::Params;
+use crate::scripts;
 use crate::BridgeError;
 
 /// Builds a deposit transaction.
 ///
 /// - Input: requestTx.out[0], key-spend by committee (presigned)
-/// - Output: DEPOSIT_SIZE, P2TR key-spend by committee
+/// - Output 0: DEPOSIT_SIZE, P2TR key-spend by committee
+/// - Output 1: P2A anchor (240 sats)
 pub fn build_deposit_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     request_txid: Txid,
@@ -32,10 +34,17 @@ pub fn build_deposit_tx(
             sequence: bitcoin::Sequence::ENABLE_RBF_NO_LOCKTIME,
             witness: Witness::new(),
         }],
-        output: vec![TxOut {
-            value: params.deposit_size,
-            script_pubkey: committee_address.script_pubkey(),
-        }],
+        output: vec![
+            TxOut {
+                value: params.deposit_size,
+                script_pubkey: committee_address.script_pubkey(),
+            },
+            // P2A anchor for CPFP fee bumping
+            TxOut {
+                value: scripts::P2A_DUST,
+                script_pubkey: scripts::p2a_script(),
+            },
+        ],
     })
 }
 
@@ -81,7 +90,7 @@ mod tests {
         let tx = build_deposit_tx(&secp, request_txid, &committee, &params).unwrap();
 
         assert_eq!(tx.input.len(), 1);
-        assert_eq!(tx.output.len(), 1);
+        assert_eq!(tx.output.len(), 2);
         assert_eq!(tx.output[0].value, params.deposit_size);
     }
 
@@ -95,13 +104,13 @@ mod tests {
         use crate::transactions::request;
 
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size).unwrap();
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
         // Build and confirm request_tx (parent of deposit)
-        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let mut request_tx = request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         let depositor_prevout = TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
                 .script_pubkey(),
         };

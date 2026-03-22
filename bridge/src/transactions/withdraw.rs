@@ -165,7 +165,7 @@ mod tests {
         let request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, {
             let dep_tmp = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
             dep_tmp.pubkey
-        }, params.deposit_size).unwrap();
+        }, params.request_input_value()).unwrap();
 
         let mut rng = StdRng::seed_from_u64(42);
         let depositor = Depositor::new(&mut rng, &secp, 0, request_utxo);
@@ -176,9 +176,9 @@ mod tests {
         operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         // Build request → deposit chain
-        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let mut request_tx = request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         let depositor_prevout = TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey: Address::p2tr(&secp, depositor.pubkey, None, Network::Bitcoin).script_pubkey(),
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
@@ -268,7 +268,7 @@ mod tests {
         let request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, {
             let dep_tmp = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
             dep_tmp.pubkey
-        }, params.deposit_size).unwrap();
+        }, params.request_input_value()).unwrap();
 
         let mut rng = StdRng::seed_from_u64(42);
         let depositor = Depositor::new(&mut rng, &secp, 0, request_utxo);
@@ -279,9 +279,9 @@ mod tests {
         operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         // Build request → deposit chain
-        let mut request_tx = request::build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let mut request_tx = request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         let depositor_prevout = TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey: Address::p2tr(&secp, depositor.pubkey, None, Network::Bitcoin).script_pubkey(),
         };
         request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();

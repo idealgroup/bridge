@@ -25,7 +25,7 @@ mod flow_tests {
     fn setup_depositor(secp: &Secp256k1<bitcoin::secp256k1::All>, params: &Params) -> (Depositor, Committee, StdRng) {
         let mut rng = StdRng::seed_from_u64(42);
         let mut depositor = Depositor::new(&mut rng, secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(secp, depositor.pubkey, params.deposit_size).unwrap();
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, secp);
         (depositor, committee, rng)
     }
@@ -37,9 +37,9 @@ mod flow_tests {
         committee: &Committee,
         params: &Params,
     ) -> bitcoin::Transaction {
-        let mut request_tx = request::build_request_tx(secp, depositor, committee, params).unwrap();
+        let mut request_tx = request::build_request_tx(secp, depositor, committee.pubkey, params).unwrap();
         let depositor_prevout = TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey: Address::p2tr(secp, depositor.pubkey, None, Network::Bitcoin).script_pubkey(),
         };
         request::sign_request_tx(secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
