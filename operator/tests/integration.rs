@@ -24,21 +24,22 @@ fn test_operator_creates_fanout_and_kickoff() {
 
     let mut client = OperatorClient::new(operator, params.clone());
 
-    // Build, sign, broadcast fanout tree
-    client.create_fanout_tree(&BITCOIN_NETWORK).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    // Build and sign fanout tree (no broadcast)
+    client.create_fanout_tree().unwrap();
     assert!(client.operator.fanout_tree.is_some());
 
-    // Create kickoff for slot 0
+    // Create kickoff for slot 0 — returns fanout path + kickoff
     let slot = 0;
     let disprove_hash = [0xaa; 32];
     let proof_msg = [0xbb; lamport::MSG_LEN];
 
-    let kickoff_tx = client
+    let txs = client
         .create_kickoff(slot, disprove_hash, &proof_msg)
         .unwrap();
 
-    BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
+    for tx in &txs {
+        BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
+    }
     BITCOIN_NETWORK.mine_blocks(1).unwrap();
 }
 
@@ -87,9 +88,8 @@ fn test_operator_completes_withdraw() {
     BITCOIN_NETWORK.mine_blocks(1).unwrap();
     let deposit_txid = deposit_tx.compute_txid();
 
-    // --- Operator creates fanout tree (on-chain) ---
-    client.create_fanout_tree(&BITCOIN_NETWORK).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    // --- Operator creates fanout tree (signed, not broadcast) ---
+    client.create_fanout_tree().unwrap();
 
     // --- Deterministic kickoff txid (operator computes, shares with committee) ---
     let slot = 0;
@@ -124,13 +124,16 @@ fn test_operator_completes_withdraw() {
         .receive_presigned_withdraw(presigned_withdraw)
         .unwrap();
 
-    // --- Operator creates and broadcasts kickoff ---
+    // --- Operator creates and broadcasts kickoff (with fanout path) ---
     let proof_msg = [0xbb; lamport::MSG_LEN];
-    let kickoff_tx = client
+    let txs = client
         .create_kickoff(slot, disprove_hash, &proof_msg)
         .unwrap();
+    let kickoff_tx = txs.last().unwrap();
     assert_eq!(kickoff_tx.compute_txid(), kickoff_txid);
-    BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
+    for tx in &txs {
+        BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
+    }
     BITCOIN_NETWORK.mine_blocks(1).unwrap();
 
     // --- Wait for timeout ---
@@ -156,9 +159,8 @@ fn test_operator_kickoff_rejected_with_wrong_lamport() {
 
     let mut client = OperatorClient::new(operator, params.clone());
 
-    // Build and broadcast fanout tree with correct keys
-    client.create_fanout_tree(&BITCOIN_NETWORK).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    // Build and sign fanout tree with correct keys (no broadcast)
+    client.create_fanout_tree().unwrap();
 
     // Swap Lamport keys: slot 0 now has slot 1's key
     client.operator.lamport_keys.swap(0, 1);
@@ -168,13 +170,19 @@ fn test_operator_kickoff_rejected_with_wrong_lamport() {
     let disprove_hash = [0xaa; 32];
     let proof_msg = [0xbb; lamport::MSG_LEN];
 
-    let kickoff_tx = client
+    let txs = client
         .create_kickoff(slot, disprove_hash, &proof_msg)
         .unwrap();
 
-    // Broadcast should fail: wrong Lamport key doesn't match fanout leaf commitment
+    // Broadcast fanout path (all but last)
+    for tx in &txs[..txs.len() - 1] {
+        BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
+    }
+    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+
+    // Broadcast kickoff should fail: wrong Lamport key doesn't match fanout leaf commitment
     assert!(
-        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).is_err(),
+        BITCOIN_NETWORK.broadcast_tx(txs.last().unwrap()).is_err(),
         "kickoff with wrong Lamport key should be rejected"
     );
 }

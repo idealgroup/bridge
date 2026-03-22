@@ -72,9 +72,8 @@ fn test_happy_path_deposit_and_withdraw() {
     // === 3. Depositor stores presigned deposit ===
     dep_client.receive_presigned_deposit(deposit_tx.clone());
 
-    // === 4. Operator creates fanout tree ===
-    op_client.create_fanout_tree(&network).unwrap();
-    network.mine_blocks(1).unwrap();
+    // === 4. Operator creates fanout tree (signed, not broadcast) ===
+    op_client.create_fanout_tree().unwrap();
 
     // === 5. Compute deterministic kickoff txid ===
     let slot = 0;
@@ -110,13 +109,16 @@ fn test_happy_path_deposit_and_withdraw() {
         .receive_presigned_withdraw(0, presigned_withdraw)
         .unwrap();
 
-    // === 8. Operator creates and broadcasts kickoff ===
+    // === 8. Operator creates and broadcasts kickoff (with fanout path) ===
     let proof_msg = [0xbb; lamport::MSG_LEN];
-    let kickoff_tx = op_client
+    let txs = op_client
         .create_kickoff(slot, disprove_hash, &proof_msg)
         .unwrap();
+    let kickoff_tx = txs.last().unwrap();
     assert_eq!(kickoff_tx.compute_txid(), kickoff_txid);
-    network.broadcast_tx(&kickoff_tx).unwrap();
+    for tx in &txs {
+        network.broadcast_tx(tx).unwrap();
+    }
     network.mine_blocks(1).unwrap();
 
     // === 9. Mine kickoff_timeout blocks ===
@@ -238,9 +240,8 @@ fn test_fraud_proof_disprove() {
     network.mine_blocks(1).unwrap();
     let deposit_txid = deposit_tx.compute_txid();
 
-    // === 3. Operator creates fanout tree ===
-    op_client.create_fanout_tree(&network).unwrap();
-    network.mine_blocks(1).unwrap();
+    // === 3. Operator creates fanout tree (signed, not broadcast) ===
+    op_client.create_fanout_tree().unwrap();
 
     // === 4. Prepare invalid proof and compute disprove hash ===
     // MockEngine: proof[0] != 0x00 is invalid, disprove_secret = proof[0..20]
@@ -280,12 +281,15 @@ fn test_fraud_proof_disprove() {
         .receive_presigned_withdraw(presigned_withdraw)
         .unwrap();
 
-    // === 6. Operator creates kickoff with invalid proof ===
-    let kickoff_tx = op_client
+    // === 6. Operator creates kickoff with invalid proof (with fanout path) ===
+    let txs = op_client
         .create_kickoff(slot, disprove_hash, &invalid_proof)
         .unwrap();
+    let kickoff_tx = txs.last().unwrap();
     assert_eq!(kickoff_tx.compute_txid(), kickoff_txid);
-    network.broadcast_tx(&kickoff_tx).unwrap();
+    for tx in &txs {
+        network.broadcast_tx(tx).unwrap();
+    }
     network.mine_blocks(1).unwrap();
 
     // === 7. Challenger scans tip block for kickoffs ===

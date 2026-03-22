@@ -22,8 +22,8 @@ impl OperatorClient {
         }
     }
 
-    /// Build, sign, and broadcast the full fanout tree.
-    pub fn create_fanout_tree(&mut self, network: &BitcoinNetwork) -> Result<(), BridgeError> {
+    /// Build and sign the full fanout tree (does not broadcast).
+    pub fn create_fanout_tree(&mut self) -> Result<(), BridgeError> {
         let init_txout = TxOut {
             value: self.params.fanout_init_value(),
             script_pubkey: Address::p2tr(&self.secp, self.operator.pubkey, None, Network::Bitcoin)
@@ -31,16 +31,6 @@ impl OperatorClient {
         };
         self.operator
             .create_fanout_tree(&self.secp, &init_txout, &self.params)?;
-        let tree = self
-            .operator
-            .fanout_tree
-            .as_ref()
-            .ok_or(BridgeError::MissingData("fanout_tree"))?;
-        for level in &tree.levels {
-            for tx in level {
-                network.broadcast_tx(tx)?;
-            }
-        }
         Ok(())
     }
 
@@ -55,14 +45,26 @@ impl OperatorClient {
     }
 
     /// Build and sign a kickoff tx for a deposit slot.
+    ///
+    /// Returns the fanout path txs (root to leaf) followed by the kickoff tx.
+    /// Caller should broadcast all in order and then mine.
     pub fn create_kickoff(
         &self,
         slot: usize,
         disprove_secret_hash: [u8; 32],
         proof: &[u8; lamport::MSG_LEN],
-    ) -> Result<Transaction, BridgeError> {
-        self.operator
-            .create_kickoff(&self.secp, slot, disprove_secret_hash, proof, &self.params)
+    ) -> Result<Vec<Transaction>, BridgeError> {
+        let tree = self
+            .operator
+            .fanout_tree
+            .as_ref()
+            .ok_or(BridgeError::MissingData("fanout_tree"))?;
+        let mut txs = tree.path_to_slot(&self.params, slot)?;
+        let kickoff = self
+            .operator
+            .create_kickoff(&self.secp, slot, disprove_secret_hash, proof, &self.params)?;
+        txs.push(kickoff);
+        Ok(txs)
     }
 
     /// Store a committee-signed withdraw tx. Indexes by kickoff txid from input[1].

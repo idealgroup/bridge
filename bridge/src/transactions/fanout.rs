@@ -48,6 +48,32 @@ impl FanoutTree {
         Ok(OutPoint::new(txid, output_index as u32))
     }
 
+    /// Returns cloned txs from root down to the leaf containing `slot`.
+    pub fn path_to_slot(&self, params: &Params, slot: usize) -> Result<Vec<Transaction>, BridgeError> {
+        if slot >= params.deposit_count {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "slot",
+                index: slot,
+                max: params.deposit_count,
+            });
+        }
+        let depth = self.levels.len();
+        let leaf_tx_index = slot / params.fanout_branching;
+
+        // Compute node index at each level (leaf to root)
+        let mut indices = vec![0usize; depth];
+        indices[depth - 1] = leaf_tx_index;
+        for d in (0..depth - 1).rev() {
+            indices[d] = indices[d + 1] / params.fanout_branching;
+        }
+
+        Ok(indices
+            .iter()
+            .enumerate()
+            .map(|(level, &idx)| self.levels[level][idx].clone())
+            .collect())
+    }
+
     /// Returns the prevouts needed to sign/verify a kickoff transaction for a given slot.
     pub fn kickoff_prevouts(&self, params: &Params, slot: usize) -> Result<Vec<TxOut>, BridgeError> {
         if slot >= params.deposit_count {
