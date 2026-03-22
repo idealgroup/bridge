@@ -88,7 +88,7 @@ ideal-bridge/
 ├── lamport/                    # standalone Lamport signature library
 │   ├── Cargo.toml
 │   └── src/lib.rs              # keygen, sign, bitcoin script verification
-├── bridge/                     # main crate
+├── bridge/                     # main crate — types, transactions, scripts
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
@@ -107,6 +107,18 @@ ideal-bridge/
 │       ├── scripts.rs          # spending condition script builders + P2A helper
 │       ├── network.rs          # BitcoinNetwork: Regtest dispatch + chain monitoring
 │       └── regtest.rs          # bitcoind regtest node management
+├── challenger/                 # standalone challenger monitoring client
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs              # ChallengerClient<E>: challenge_kickoff, scan_block_for_kickoffs
+│   │   └── main.rs             # placeholder
+│   └── tests/integration.rs    # 3 tests: detect fraud, ignore valid, scan blocks
+├── operator/                   # standalone operator monitoring client
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs              # OperatorClient: create_fanout_tree, create_kickoff, complete_withdraw
+│   │   └── main.rs             # placeholder
+│   └── tests/integration.rs    # 3 tests: fanout+kickoff, full withdraw, wrong lamport rejected
 ```
 
 ## Build Order
