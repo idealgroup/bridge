@@ -4,6 +4,7 @@ pub mod network;
 pub mod params;
 pub mod regtest;
 pub mod scripts;
+pub mod test_support;
 pub mod transactions;
 
 use std::fmt;

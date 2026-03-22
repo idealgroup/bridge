@@ -3,18 +3,14 @@ use bitcoin::secp256k1::Secp256k1;
 use bitcoin::transaction::TxOut;
 use bitcoin::{Address, Network, OutPoint, Txid};
 use rand::rngs::StdRng;
-use rand::SeedableRng;
 
 use bridge::actor::Operator;
 use bridge::engine::MockEngine;
 use bridge::params::Params;
 use bridge::regtest::RegtestNode;
+use bridge::test_support::test_rng_seeded;
 
 use challenger::ChallengerClient;
-
-fn test_rng() -> StdRng {
-    StdRng::seed_from_u64(99)
-}
 
 /// Start a fresh isolated regtest node for a single test.
 fn fresh_node() -> RegtestNode {
@@ -60,7 +56,7 @@ fn setup_operator_with_fanout(
 fn test_challenger_detects_and_disproves_invalid_proof() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(99);
     let node = fresh_node();
 
     // Operator side: setup fanout
@@ -107,7 +103,7 @@ fn test_challenger_detects_and_disproves_invalid_proof() {
 fn test_challenger_ignores_valid_proof() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(99);
     let node = fresh_node();
 
     let operator = setup_operator_with_fanout(&secp, &mut rng, &node, &params);
@@ -143,7 +139,7 @@ fn test_challenger_ignores_valid_proof() {
 fn test_challenger_scan_block_finds_kickoff() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(99);
     let node = fresh_node();
 
     let operator = setup_operator_with_fanout(&secp, &mut rng, &node, &params);

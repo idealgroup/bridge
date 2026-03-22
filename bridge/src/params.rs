@@ -18,7 +18,7 @@ pub struct Params {
 
 impl Default for Params {
     fn default() -> Self {
-        Self {
+        let p = Self {
             deposit_size: Amount::from_int_btc(1),
             dust_amount: Amount::from_sat(546),
             proof_size: 256,
@@ -32,13 +32,15 @@ impl Default for Params {
             kickoff_timeout: Sequence::from_512_second_intervals(507),
             // ~1 hour in 512-second intervals: 3600/512 ≈ 7
             deposit_timeout: Sequence::from_512_second_intervals(7),
-        }
+        };
+        p.validate().expect("default params must be valid");
+        p
     }
 }
 
 impl Params {
     pub fn test_defaults() -> Self {
-        Self {
+        let p = Self {
             deposit_size: Amount::from_sat(100_000),
             dust_amount: Amount::from_sat(546),
             proof_size: 256,
@@ -50,11 +52,33 @@ impl Params {
             lamport_chunks_per_slot: 3,
             kickoff_timeout: Sequence::from_height(10),
             deposit_timeout: Sequence::from_height(5),
-        }
+        };
+        p.validate().expect("test params must be valid");
+        p
     }
 
     /// Validate that derived parameters are consistent.
     pub fn validate(&self) -> Result<(), crate::BridgeError> {
+        if self.deposit_count == 0 {
+            return Err(crate::BridgeError::InvalidParams(
+                "deposit_count must be > 0".into(),
+            ));
+        }
+        if self.fanout_branching <= 1 {
+            return Err(crate::BridgeError::InvalidParams(
+                "fanout_branching must be > 1".into(),
+            ));
+        }
+        if self.fanout_depth == 0 {
+            return Err(crate::BridgeError::InvalidParams(
+                "fanout_depth must be > 0".into(),
+            ));
+        }
+        if self.proof_size == 0 {
+            return Err(crate::BridgeError::InvalidParams(
+                "proof_size must be > 0".into(),
+            ));
+        }
         let total_bits = self.proof_size * 8;
         let expected_chunks =
             total_bits.div_ceil(lamport::MAX_BITS_PER_CHUNK);

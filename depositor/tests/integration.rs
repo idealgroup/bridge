@@ -1,31 +1,22 @@
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::transaction::TxOut;
-use bitcoin::{OutPoint, ScriptBuf, Txid};
-use rand::rngs::StdRng;
-use rand::SeedableRng;
+use bitcoin::ScriptBuf;
 
 use bridge::actor::{Committee, Depositor, Operator};
 use bridge::network::BITCOIN_NETWORK;
 use bridge::params::Params;
 use bridge::scripts;
+use bridge::test_support::{test_rng_seeded, dummy_outpoint};
 
 use depositor::DepositorClient;
-
-fn test_rng() -> StdRng {
-    StdRng::seed_from_u64(77)
-}
-
-fn dummy_outpoint() -> OutPoint {
-    OutPoint::new(Txid::all_zeros(), 0)
-}
 
 /// Depositor funds a request UTXO, creates a requestTx via the client, broadcasts it.
 #[test]
 fn test_depositor_creates_request() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(77);
 
     let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
     let committee = Committee::new(&mut rng, &secp);
@@ -52,7 +43,7 @@ fn test_depositor_creates_request() {
 fn test_depositor_cancel_after_timeout() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(77);
 
     let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
     let committee = Committee::new(&mut rng, &secp);
@@ -94,7 +85,7 @@ fn test_depositor_cancel_before_timeout_rejected() {
 
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(77);
 
     let mut depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
     let committee = Committee::new(&mut rng, &secp);
@@ -156,7 +147,7 @@ fn test_depositor_cancel_before_timeout_rejected() {
 fn test_depositor_receives_presigned_deposit_and_withdraw() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(77);
 
     let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
     let committee = Committee::new(&mut rng, &secp);

@@ -164,13 +164,9 @@ mod tests {
     use super::*;
     use bitcoin::key::Keypair;
     use bitcoin::secp256k1::SecretKey;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
     use rand::Rng;
 
-    fn test_rng() -> StdRng {
-        StdRng::seed_from_u64(42)
-    }
+    use crate::test_support::test_rng;
 
     fn random_keypair(rng: &mut impl Rng, secp: &Secp256k1<bitcoin::secp256k1::All>) -> Keypair {
         let mut bytes = [0u8; 32];

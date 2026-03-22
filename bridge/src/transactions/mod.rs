@@ -13,17 +13,17 @@ mod flow_tests {
     use bitcoin::transaction::TxOut;
     use bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid};
     use rand::rngs::StdRng;
-    use rand::SeedableRng;
 
     use crate::actor::{Committee, Depositor, Operator};
     use crate::network::BITCOIN_NETWORK;
     use crate::params::Params;
     use crate::scripts;
+    use crate::test_support::test_rng;
     use super::{cancel, deposit, disprove, fanout, kickoff, request, withdraw};
 
     // Helper: create depositor with funded UTXO
     fn setup_depositor(secp: &Secp256k1<bitcoin::secp256k1::All>, params: &Params) -> (Depositor, Committee, StdRng) {
-        let mut rng = StdRng::seed_from_u64(42);
+        let mut rng = test_rng();
         let mut depositor = Depositor::new(&mut rng, secp, 0, OutPoint::new(Txid::all_zeros(), 0));
         depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, secp);
@@ -129,7 +129,7 @@ mod flow_tests {
     #[test]
     fn test_fanout_to_kickoff_flow() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
+        let mut rng = test_rng();
         let params = Params::test_defaults();
 
         let (operator, tree) = setup_operator_with_fanout(&secp, &mut rng, &params);
@@ -140,7 +140,7 @@ mod flow_tests {
             &secp, &operator, slot, &tree, disprove_hash, &params,
         ).unwrap();
 
-        let prevouts = tree.kickoff_prevouts(&params, slot);
+        let prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
 
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
@@ -185,7 +185,7 @@ mod flow_tests {
         let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, disprove_hash, &params,
         ).unwrap();
-        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
         let lamport_pk = operator.lamport_pubkey(slot).unwrap();
@@ -226,7 +226,7 @@ mod flow_tests {
     #[test]
     fn test_kickoff_to_disprove_flow() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
+        let mut rng = test_rng();
         let params = Params::test_defaults();
 
         let (operator, tree) = setup_operator_with_fanout(&secp, &mut rng, &params);
@@ -238,7 +238,7 @@ mod flow_tests {
         let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, disprove_hash, &params,
         ).unwrap();
-        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
         let lamport_pk = operator.lamport_pubkey(slot).unwrap();

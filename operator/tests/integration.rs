@@ -1,24 +1,14 @@
-use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::transaction::TxOut;
-use bitcoin::{OutPoint, ScriptBuf, Txid};
-use rand::rngs::StdRng;
-use rand::SeedableRng;
+use bitcoin::ScriptBuf;
 
 use bridge::actor::{Committee, Depositor, Operator};
 use bridge::network::BITCOIN_NETWORK;
 use bridge::params::Params;
 use bridge::scripts;
+use bridge::test_support::{test_rng_seeded, dummy_outpoint};
 
 use operator::OperatorClient;
-
-fn test_rng() -> StdRng {
-    StdRng::seed_from_u64(99)
-}
-
-fn dummy_outpoint() -> OutPoint {
-    OutPoint::new(Txid::all_zeros(), 0)
-}
 
 /// Operator builds fanout tree, broadcasts, creates kickoff, confirms on-chain.
 /// No depositor or committee state shared.
@@ -26,7 +16,7 @@ fn dummy_outpoint() -> OutPoint {
 fn test_operator_creates_fanout_and_kickoff() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(99);
 
     let mut operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
     operator.init_utxo =
@@ -59,7 +49,7 @@ fn test_operator_creates_fanout_and_kickoff() {
 fn test_operator_completes_withdraw() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(99);
 
     // === Depositor setup (independent actor) ===
     let mut depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
@@ -158,7 +148,7 @@ fn test_operator_completes_withdraw() {
 fn test_operator_kickoff_rejected_with_wrong_lamport() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(99);
 
     let mut operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
     operator.init_utxo =

@@ -73,7 +73,7 @@ All `SIGHASH_ALL` — every tx is fully determined at sign time. The `kickoffTx`
 | Ethereum interaction | Typed events | No Ethereum deps; clean integration boundary |
 | Committee signing | Direct signing functions | `presign_deposit_tx()` / `presign_withdraw_input0()`; MuSig2 aggregation deferred to CLI/server layer |
 | Script execution | `BitcoinNetwork` enum | All verification through live bitcoind (`Regtest` mode). Chain monitoring via `broadcast_tx`, `get_raw_transaction`, `get_block_at_height`, `get_chain_tip`, `poll_new_blocks`. |
-| Anchor outputs | P2A on `kickoffTx` + `withdrawTx` | Presigned txs need CPFP fee bumping |
+| Anchor outputs | P2A on `depositTx` + `kickoffTx` + `withdrawTx` | Presigned txs need CPFP fee bumping |
 | Dust outputs | `DUST_AMOUNT` = 546 sats | For non-value-bearing outputs (fanout, connector, disprove) |
 | Timelocks | Relative (`OP_CSV` + `nSequence`) | `cancelTx` uses `OP_CSV` in script; `withdrawTx` connector timelock enforced by `nSequence` committed in committee's presigned input0 |
 | Operator coordination | Out of scope | Economic incentive only; no explicit mechanism |
@@ -119,6 +119,15 @@ ideal-bridge/
 │   │   ├── lib.rs              # OperatorClient: create_fanout_tree, create_kickoff, complete_withdraw
 │   │   └── main.rs             # placeholder
 │   └── tests/integration.rs    # 3 tests: fanout+kickoff, full withdraw, wrong lamport rejected
+├── depositor/                  # standalone depositor client
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs              # DepositorClient: create_request, create_cancel, receive presigned txs
+│   │   └── main.rs             # placeholder
+│   └── tests/integration.rs    # 4 tests: request, cancel, cancel-before-timeout rejected, presigned rx
+├── e2e/                        # end-to-end integration tests across all actor clients
+│   ├── Cargo.toml
+│   └── tests/e2e.rs            # 3 tests: happy path withdraw, cancel escape hatch, fraud proof disprove
 ```
 
 ## Build Order

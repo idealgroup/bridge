@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bitcoin::transaction::Transaction;
 use bitcoin::secp256k1::{All, Secp256k1};
 use crate::BridgeError;
@@ -8,9 +10,11 @@ pub enum BitcoinNetworkMode {
 
 pub struct BitcoinNetwork {
     mode: BitcoinNetworkMode,
+    /// When set, uses this node instead of the shared static.
+    node: Option<Arc<crate::regtest::RegtestNode>>,
 }
 
-pub static REGTEST_NODE: std::sync::LazyLock<crate::regtest::RegtestNode> =
+static SHARED_REGTEST_NODE: std::sync::LazyLock<crate::regtest::RegtestNode> =
     std::sync::LazyLock::new(|| {
         let node = crate::regtest::RegtestNode::start().expect("start regtest node");
         node.mine_blocks(101).expect("mine for coinbase maturity");
@@ -19,7 +23,25 @@ pub static REGTEST_NODE: std::sync::LazyLock<crate::regtest::RegtestNode> =
 
 impl BitcoinNetwork {
     pub fn new(mode: BitcoinNetworkMode) -> Self {
-        Self { mode }
+        Self { mode, node: None }
+    }
+
+    /// Start a fresh isolated regtest node (mines 101 blocks for coinbase maturity).
+    /// Each call creates a new bitcoind process — use for tests that need isolation.
+    pub fn new_regtest() -> Result<Self, BridgeError> {
+        let node = crate::regtest::RegtestNode::start()?;
+        node.mine_blocks(101)?;
+        Ok(Self {
+            mode: BitcoinNetworkMode::Regtest,
+            node: Some(Arc::new(node)),
+        })
+    }
+
+    fn regtest_node(&self) -> &crate::regtest::RegtestNode {
+        match &self.node {
+            Some(n) => n,
+            None => &SHARED_REGTEST_NODE,
+        }
     }
 
     /// Fund a P2TR address with a real funded UTXO.
@@ -32,7 +54,7 @@ impl BitcoinNetwork {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
                 let addr = bitcoin::Address::p2tr(secp, pubkey, None, bitcoin::Network::Regtest);
-                REGTEST_NODE.fund_address(&addr, amount)
+                self.regtest_node().fund_address(&addr, amount)
             }
         }
     }
@@ -41,7 +63,7 @@ impl BitcoinNetwork {
     pub fn mine_blocks(&self, n: u64) -> Result<(), BridgeError> {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
-                REGTEST_NODE.mine_blocks(n)
+                self.regtest_node().mine_blocks(n)
             }
         }
     }
@@ -49,7 +71,7 @@ impl BitcoinNetwork {
     /// Broadcast a transaction without mining.
     pub fn broadcast_tx(&self, tx: &Transaction) -> Result<bitcoin::Txid, BridgeError> {
         match &self.mode {
-            BitcoinNetworkMode::Regtest => REGTEST_NODE.send_transaction(tx),
+            BitcoinNetworkMode::Regtest => self.regtest_node().send_transaction(tx),
         }
     }
 
@@ -58,7 +80,7 @@ impl BitcoinNetwork {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
                 use bitcoincore_rpc::RpcApi;
-                REGTEST_NODE
+                self.regtest_node()
                     .client
                     .get_raw_transaction(txid, None)
                     .map_err(|e| BridgeError::Regtest(format!("get_raw_transaction: {e}")))
@@ -71,11 +93,12 @@ impl BitcoinNetwork {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
                 use bitcoincore_rpc::RpcApi;
-                let hash = REGTEST_NODE
+                let node = self.regtest_node();
+                let hash = node
                     .client
                     .get_block_hash(height)
                     .map_err(|e| BridgeError::Regtest(format!("get_block_hash: {e}")))?;
-                REGTEST_NODE
+                node
                     .client
                     .get_block(&hash)
                     .map_err(|e| BridgeError::Regtest(format!("get_block: {e}")))
@@ -88,7 +111,7 @@ impl BitcoinNetwork {
         match &self.mode {
             BitcoinNetworkMode::Regtest => {
                 use bitcoincore_rpc::RpcApi;
-                REGTEST_NODE
+                self.regtest_node()
                     .client
                     .get_block_count()
                     .map_err(|e| BridgeError::Regtest(format!("get_block_count: {e}")))

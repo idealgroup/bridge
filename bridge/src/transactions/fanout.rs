@@ -19,24 +19,59 @@ pub struct FanoutTree {
 
 impl FanoutTree {
     /// Returns the outpoint for a given deposit slot and Lamport chunk.
-    pub fn leaf_outpoint(&self, params: &Params, slot: usize, chunk: usize) -> OutPoint {
+    pub fn leaf_outpoint(&self, params: &Params, slot: usize, chunk: usize) -> Result<OutPoint, BridgeError> {
+        if slot >= params.deposit_count {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "slot",
+                index: slot,
+                max: params.deposit_count,
+            });
+        }
+        if chunk >= params.lamport_chunks_per_slot {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "chunk",
+                index: chunk,
+                max: params.lamport_chunks_per_slot,
+            });
+        }
         let leaf_level = &self.levels[self.levels.len() - 1];
         let tx_index = slot / params.fanout_branching;
+        if tx_index >= leaf_level.len() {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "leaf tx_index",
+                index: tx_index,
+                max: leaf_level.len(),
+            });
+        }
         let output_index = (slot % params.fanout_branching) * params.lamport_chunks_per_slot + chunk;
         let txid = leaf_level[tx_index].compute_txid();
-        OutPoint::new(txid, output_index as u32)
+        Ok(OutPoint::new(txid, output_index as u32))
     }
 
     /// Returns the prevouts needed to sign/verify a kickoff transaction for a given slot.
-    pub fn kickoff_prevouts(&self, params: &Params, slot: usize) -> Vec<TxOut> {
+    pub fn kickoff_prevouts(&self, params: &Params, slot: usize) -> Result<Vec<TxOut>, BridgeError> {
+        if slot >= params.deposit_count {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "slot",
+                index: slot,
+                max: params.deposit_count,
+            });
+        }
         let leaf_level = &self.levels[self.levels.len() - 1];
         let tx_index = slot / params.fanout_branching;
-        (0..params.lamport_chunks_per_slot)
+        if tx_index >= leaf_level.len() {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "leaf tx_index",
+                index: tx_index,
+                max: leaf_level.len(),
+            });
+        }
+        Ok((0..params.lamport_chunks_per_slot)
             .map(|chunk| {
                 let output_index = (slot % params.fanout_branching) * params.lamport_chunks_per_slot + chunk;
                 leaf_level[tx_index].output[output_index].clone()
             })
-            .collect()
+            .collect())
     }
 }
 
@@ -221,13 +256,8 @@ mod tests {
     use super::*;
     use crate::actor::Operator;
     use crate::params::Params;
+    use crate::test_support::test_rng;
     use bitcoin::Txid;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
-
-    fn test_rng() -> StdRng {
-        StdRng::seed_from_u64(42)
-    }
 
     #[test]
     fn test_fanout_tree_structure() {
@@ -301,19 +331,19 @@ mod tests {
         let tree = build_fanout_tree(&secp, &operator, &params).unwrap();
 
         // Slot 0, chunk 0 -> leaf tx 0, output 0
-        let op = tree.leaf_outpoint(&params, 0, 0);
+        let op = tree.leaf_outpoint(&params, 0, 0).unwrap();
         assert_eq!(op.vout, 0);
 
         // Slot 0, chunk 2 -> leaf tx 0, output 2
-        let op = tree.leaf_outpoint(&params, 0, 2);
+        let op = tree.leaf_outpoint(&params, 0, 2).unwrap();
         assert_eq!(op.vout, 2);
 
         // Slot 1, chunk 0 -> leaf tx 0, output 3
-        let op = tree.leaf_outpoint(&params, 1, 0);
+        let op = tree.leaf_outpoint(&params, 1, 0).unwrap();
         assert_eq!(op.vout, 3);
 
         // Slot 2, chunk 0 -> leaf tx 1, output 0
-        let op = tree.leaf_outpoint(&params, 2, 0);
+        let op = tree.leaf_outpoint(&params, 2, 0).unwrap();
         assert_eq!(op.vout, 0);
     }
 

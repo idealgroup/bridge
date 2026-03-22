@@ -106,7 +106,7 @@ mod tests {
         let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, secret_hash, &params,
         ).unwrap();
-        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
         let lamport_pk = operator.lamport_pubkey(slot).unwrap();
@@ -166,7 +166,7 @@ mod tests {
         let mut kickoff_tx = kickoff::build_kickoff_tx(
             &secp, &operator, slot, &tree, secret_hash, &params,
         ).unwrap();
-        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot);
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
         let msg = [0xbb; lamport::MSG_LEN];
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
         let lamport_pk = operator.lamport_pubkey(slot).unwrap();

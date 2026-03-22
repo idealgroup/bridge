@@ -1,26 +1,22 @@
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::transaction::TxOut;
-use bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid};
-use rand::rngs::StdRng;
-use rand::SeedableRng;
+use bitcoin::{Address, Network, ScriptBuf};
 
 use bridge::actor::{Committee, Depositor, Operator};
 use bridge::engine::MockEngine;
-use bridge::network::BITCOIN_NETWORK;
+use bridge::network::BitcoinNetwork;
 use bridge::params::Params;
 use bridge::scripts;
+use bridge::test_support::{test_rng_seeded, dummy_outpoint};
 
 use challenger::ChallengerClient;
 use depositor::DepositorClient;
 use operator::OperatorClient;
 
-fn test_rng() -> StdRng {
-    StdRng::seed_from_u64(0xe2e)
-}
-
-fn dummy_outpoint() -> OutPoint {
-    OutPoint::new(Txid::all_zeros(), 0)
+/// Start a fresh isolated regtest node for a single test.
+fn fresh_network() -> BitcoinNetwork {
+    BitcoinNetwork::new_regtest().expect("start regtest node")
 }
 
 /// Full deposit -> withdraw cycle. Each actor uses only its own client API.
@@ -31,7 +27,8 @@ fn dummy_outpoint() -> OutPoint {
 fn test_happy_path_deposit_and_withdraw() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(0xe2e);
+    let network = fresh_network();
 
     // === Create actors (each independent) ===
     let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
@@ -40,9 +37,9 @@ fn test_happy_path_deposit_and_withdraw() {
 
     // === Fund actors ===
     let request_utxo =
-        BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
+        network.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
     let operator_init_utxo =
-        BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
+        network.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
     // === Wrap in client APIs ===
     let mut dep_client = DepositorClient::new(depositor, params.clone());
@@ -54,8 +51,8 @@ fn test_happy_path_deposit_and_withdraw() {
     let request_tx = dep_client
         .create_request(committee.pubkey, request_utxo)
         .unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    network.broadcast_tx(&request_tx).unwrap();
+    network.mine_blocks(1).unwrap();
     let request_txid = request_tx.compute_txid();
 
     // === 2. Committee presigns deposit ===
@@ -68,16 +65,16 @@ fn test_happy_path_deposit_and_withdraw() {
             &params,
         )
         .unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    network.broadcast_tx(&deposit_tx).unwrap();
+    network.mine_blocks(1).unwrap();
     let deposit_txid = deposit_tx.compute_txid();
 
     // === 3. Depositor stores presigned deposit ===
     dep_client.receive_presigned_deposit(deposit_tx.clone());
 
     // === 4. Operator creates fanout tree ===
-    op_client.create_fanout_tree(&BITCOIN_NETWORK).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    op_client.create_fanout_tree(&network).unwrap();
+    network.mine_blocks(1).unwrap();
 
     // === 5. Compute deterministic kickoff txid ===
     let slot = 0;
@@ -119,19 +116,19 @@ fn test_happy_path_deposit_and_withdraw() {
         .create_kickoff(slot, disprove_hash, &proof_msg)
         .unwrap();
     assert_eq!(kickoff_tx.compute_txid(), kickoff_txid);
-    BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    network.broadcast_tx(&kickoff_tx).unwrap();
+    network.mine_blocks(1).unwrap();
 
     // === 9. Mine kickoff_timeout blocks ===
-    BITCOIN_NETWORK
+    network
         .mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64)
         .unwrap();
 
     // === 10. Operator completes withdraw ===
     let withdraw_tx = op_client
-        .complete_withdraw(kickoff_txid, disprove_hash, &withdraw_prevouts, &BITCOIN_NETWORK)
+        .complete_withdraw(kickoff_txid, disprove_hash, &withdraw_prevouts, &network)
         .unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    network.mine_blocks(1).unwrap();
 
     // === 11. Assert withdraw output pays operator deposit_size ===
     assert_eq!(withdraw_tx.output[0].value, params.deposit_size);
@@ -148,7 +145,8 @@ fn test_happy_path_deposit_and_withdraw() {
 fn test_cancel_escape_hatch() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(0xe2e);
+    let network = fresh_network();
 
     // === Create actors ===
     let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
@@ -156,7 +154,7 @@ fn test_cancel_escape_hatch() {
 
     // === Fund depositor ===
     let request_utxo =
-        BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
+        network.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
 
     let mut dep_client = DepositorClient::new(depositor, params.clone());
 
@@ -164,11 +162,11 @@ fn test_cancel_escape_hatch() {
     let request_tx = dep_client
         .create_request(committee.pubkey, request_utxo)
         .unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    network.broadcast_tx(&request_tx).unwrap();
+    network.mine_blocks(1).unwrap();
 
     // === 2. Mine deposit_timeout + 1 blocks (CSV satisfaction) ===
-    BITCOIN_NETWORK
+    network
         .mine_blocks(params.deposit_timeout.to_consensus_u32() as u64 + 1)
         .unwrap();
 
@@ -177,8 +175,8 @@ fn test_cancel_escape_hatch() {
     let cancel_tx = dep_client
         .create_cancel(committee.pubkey, request_txid, &request_tx.output[0])
         .unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&cancel_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    network.broadcast_tx(&cancel_tx).unwrap();
+    network.mine_blocks(1).unwrap();
 
     // === 4. Assert deposit_secret in witness[1] (32 bytes) ===
     assert_eq!(cancel_tx.input[0].witness[1].len(), 32);
@@ -198,7 +196,8 @@ fn test_cancel_escape_hatch() {
 fn test_fraud_proof_disprove() {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng();
+    let mut rng = test_rng_seeded(0xe2e);
+    let network = fresh_network();
 
     // === Create actors ===
     let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
@@ -207,9 +206,9 @@ fn test_fraud_proof_disprove() {
 
     // === Fund actors ===
     let request_utxo =
-        BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
+        network.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
     let operator_init_utxo =
-        BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
+        network.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
     // === Wrap in client APIs ===
     let mut dep_client = DepositorClient::new(depositor, params.clone());
@@ -221,8 +220,8 @@ fn test_fraud_proof_disprove() {
     let request_tx = dep_client
         .create_request(committee.pubkey, request_utxo)
         .unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    network.broadcast_tx(&request_tx).unwrap();
+    network.mine_blocks(1).unwrap();
     let request_txid = request_tx.compute_txid();
 
     // === 2. Committee presigns deposit ===
@@ -235,13 +234,13 @@ fn test_fraud_proof_disprove() {
             &params,
         )
         .unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    network.broadcast_tx(&deposit_tx).unwrap();
+    network.mine_blocks(1).unwrap();
     let deposit_txid = deposit_tx.compute_txid();
 
     // === 3. Operator creates fanout tree ===
-    op_client.create_fanout_tree(&BITCOIN_NETWORK).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    op_client.create_fanout_tree(&network).unwrap();
+    network.mine_blocks(1).unwrap();
 
     // === 4. Prepare invalid proof and compute disprove hash ===
     // MockEngine: proof[0] != 0x00 is invalid, disprove_secret = proof[0..20]
@@ -286,12 +285,12 @@ fn test_fraud_proof_disprove() {
         .create_kickoff(slot, disprove_hash, &invalid_proof)
         .unwrap();
     assert_eq!(kickoff_tx.compute_txid(), kickoff_txid);
-    BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    network.broadcast_tx(&kickoff_tx).unwrap();
+    network.mine_blocks(1).unwrap();
 
     // === 7. Challenger scans tip block for kickoffs ===
-    let tip = BITCOIN_NETWORK.get_chain_tip().unwrap();
-    let block = BITCOIN_NETWORK.get_block_at_height(tip).unwrap();
+    let tip = network.get_chain_tip().unwrap();
+    let block = network.get_block_at_height(tip).unwrap();
 
     let challenger = ChallengerClient::new(MockEngine, params.clone());
     let candidates = challenger.scan_block_for_kickoffs(&block);
@@ -303,11 +302,11 @@ fn test_fraud_proof_disprove() {
 
     // === 9. Broadcast disprove tx (burns connector) ===
     let disprove_tx = result.unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&disprove_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
+    network.broadcast_tx(&disprove_tx).unwrap();
+    network.mine_blocks(1).unwrap();
 
     // === 10. Mine kickoff_timeout blocks ===
-    BITCOIN_NETWORK
+    network
         .mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64)
         .unwrap();
 
@@ -316,7 +315,7 @@ fn test_fraud_proof_disprove() {
         kickoff_txid,
         disprove_hash,
         &withdraw_prevouts,
-        &BITCOIN_NETWORK,
+        &network,
     );
     assert!(
         withdraw_result.is_err(),

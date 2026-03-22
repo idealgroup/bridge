@@ -182,17 +182,18 @@ pub fn build_kickoff_tx(
     }
 
     // 3 inputs: one per Lamport chunk
-    let inputs: Vec<TxIn> = (0..params.lamport_chunks_per_slot)
+    let inputs: Result<Vec<TxIn>, _> = (0..params.lamport_chunks_per_slot)
         .map(|chunk| {
-            let outpoint = fanout_tree.leaf_outpoint(params, slot, chunk);
-            TxIn {
+            let outpoint = fanout_tree.leaf_outpoint(params, slot, chunk)?;
+            Ok(TxIn {
                 previous_output: outpoint,
                 script_sig: ScriptBuf::new(),
                 sequence: bitcoin::Sequence::ENABLE_RBF_NO_LOCKTIME,
                 witness: Witness::new(),
-            }
+            })
         })
         .collect();
+    let inputs = inputs?;
 
     // Output 0: connector
     let connector_info = scripts::connector_spend_info(
@@ -288,15 +289,14 @@ mod tests {
     use super::*;
     use crate::actor::Operator;
     use crate::params::Params;
+    use crate::test_support::test_rng;
     use crate::transactions::fanout;
     use bitcoin::{OutPoint, Txid};
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
 
     #[test]
     fn test_build_kickoff_tx() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
+        let mut rng = test_rng();
         let params = Params::test_defaults();
         let init_utxo = OutPoint::new(Txid::all_zeros(), 0);
         let operator = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn test_sign_kickoff_tx() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
+        let mut rng = test_rng();
         let params = Params::test_defaults();
 
         use crate::network::BITCOIN_NETWORK;
@@ -345,7 +345,7 @@ mod tests {
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
         let lamport_pk = operator.lamport_pubkey(slot).unwrap();
 
-        let prevouts = tree.kickoff_prevouts(&params, slot);
+        let prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
 
         sign_kickoff_tx(
             &secp, &mut tx, &operator.keypair,
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn test_extract_proof_from_kickoff() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
+        let mut rng = test_rng();
         let params = Params::test_defaults();
 
         use crate::network::BITCOIN_NETWORK;
@@ -398,7 +398,7 @@ mod tests {
         let lamport_sig = operator.lamport_keys[slot].sign(&msg);
         let lamport_pk = operator.lamport_pubkey(slot).unwrap();
 
-        let prevouts = tree.kickoff_prevouts(&params, slot);
+        let prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
 
         sign_kickoff_tx(
             &secp, &mut tx, &operator.keypair,
@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn test_kickoff_slot_out_of_range() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
+        let mut rng = test_rng();
         let params = Params::test_defaults();
         let init_utxo = OutPoint::new(Txid::all_zeros(), 0);
         let operator = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
@@ -431,7 +431,7 @@ mod tests {
     #[test]
     fn test_kickoff_wrong_lamport_rejected() {
         let secp = Secp256k1::new();
-        let mut rng = StdRng::seed_from_u64(42);
+        let mut rng = test_rng();
         let params = Params::test_defaults();
 
         use crate::network::BITCOIN_NETWORK;
@@ -463,7 +463,7 @@ mod tests {
         let wrong_lamport_sig = operator.lamport_keys[1].sign(&msg);
         let correct_lamport_pk = operator.lamport_pubkey(slot).unwrap();
 
-        let prevouts = tree.kickoff_prevouts(&params, slot);
+        let prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
 
         sign_kickoff_tx(
             &secp, &mut tx, &operator.keypair,

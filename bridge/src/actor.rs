@@ -131,8 +131,15 @@ impl Operator {
             .ok_or(BridgeError::MissingData("fanout_tree"))?;
         let mut tx =
             kickoff::build_kickoff_tx(secp, self, slot, tree, disprove_secret_hash, params)?;
-        let prevouts = tree.kickoff_prevouts(params, slot);
-        let lamport_sig = self.lamport_keys[slot].sign(proof_msg);
+        let prevouts = tree.kickoff_prevouts(params, slot)?;
+        let lamport_sig = self.lamport_keys
+            .get(slot)
+            .ok_or(BridgeError::IndexOutOfRange {
+                name: "lamport slot",
+                index: slot,
+                max: self.lamport_keys.len(),
+            })?
+            .sign(proof_msg);
         let lamport_pk = self.lamport_pubkey(slot)?;
         kickoff::sign_kickoff_tx(
             secp,
@@ -385,19 +392,10 @@ impl Challenger {
 mod tests {
     use super::*;
     use bitcoin::hashes::{sha256, Hash};
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
 
     use crate::engine::MockEngine;
     use crate::network::BITCOIN_NETWORK;
-
-    fn test_rng() -> StdRng {
-        StdRng::seed_from_u64(42)
-    }
-
-    fn dummy_outpoint() -> OutPoint {
-        OutPoint::new(Txid::all_zeros(), 0)
-    }
+    use crate::test_support::{test_rng, dummy_outpoint};
 
     #[test]
     fn test_operator_creation() {
