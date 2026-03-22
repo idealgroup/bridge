@@ -2,6 +2,7 @@ use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::transaction::Transaction;
 
+use bridge::actor::Challenger;
 use bridge::engine::BitVMEngine;
 use bridge::params::Params;
 use bridge::scripts;
@@ -9,6 +10,7 @@ use bridge::transactions::kickoff;
 use bridge::BridgeError;
 
 pub struct ChallengerClient<E: BitVMEngine> {
+    challenger: Challenger,
     engine: E,
     params: Params,
     secp: Secp256k1<All>,
@@ -17,6 +19,7 @@ pub struct ChallengerClient<E: BitVMEngine> {
 impl<E: BitVMEngine> ChallengerClient<E> {
     pub fn new(engine: E, params: Params) -> Self {
         Self {
+            challenger: Challenger::new(),
             engine,
             params,
             secp: Secp256k1::new(),
@@ -33,8 +36,8 @@ impl<E: BitVMEngine> ChallengerClient<E> {
         let data = kickoff::extract_proof_from_kickoff(kickoff_tx, &self.params)?;
 
         let secret = self
-            .engine
-            .extract_disprove_secret(&data.proof, &data.lamport_pk)?;
+            .challenger
+            .check_proof(&self.engine, &data.proof, &data.lamport_pk)?;
 
         let Some(disprove_secret) = secret else {
             return Ok(None);
@@ -42,21 +45,14 @@ impl<E: BitVMEngine> ChallengerClient<E> {
 
         let disprove_hash =
             bitcoin::hashes::sha256::Hash::hash(&disprove_secret).to_byte_array();
-
         let kickoff_txid = kickoff_tx.compute_txid();
-        let connector_info = scripts::connector_spend_info(
-            &self.secp,
-            data.operator_pubkey,
-            disprove_hash,
-        )?;
 
-        let mut disprove_tx =
-            bridge::transactions::disprove::build_disprove_tx(kickoff_txid);
-        bridge::transactions::disprove::witness_disprove_tx(
-            &mut disprove_tx,
+        let disprove_tx = self.challenger.create_disprove(
+            &self.secp,
+            kickoff_txid,
             disprove_secret,
             disprove_hash,
-            &connector_info,
+            data.operator_pubkey,
         )?;
 
         Ok(Some(disprove_tx))
