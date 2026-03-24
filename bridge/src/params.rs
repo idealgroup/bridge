@@ -134,9 +134,9 @@ impl Params {
     }
 
     /// Value the depositor must fund into their request UTXO.
-    /// Covers `deposit_size` plus the P2A anchor on the deposit tx.
+    /// Must exceed `deposit_size` so the difference covers the deposit tx fee.
     pub fn request_input_value(&self) -> Amount {
-        self.deposit_size + crate::scripts::P2A_DUST
+        self.deposit_size + self.dust_amount
     }
 }
 

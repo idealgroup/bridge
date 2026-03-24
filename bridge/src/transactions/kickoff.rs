@@ -5,7 +5,7 @@ use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::taproot::LeafVersion;
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
-use bitcoin::{ScriptBuf, Witness};
+use bitcoin::{Address, Network, ScriptBuf, Witness};
 
 use crate::actor::Operator;
 use crate::engine::Proof;
@@ -164,7 +164,7 @@ pub fn extract_proof_from_kickoff(
 /// Builds a kickoff transaction for a given deposit slot.
 ///
 /// - 3 inputs: fanout leaf UTXOs (one per Lamport chunk), script-path spend
-/// - 2 outputs: [0] connector (P2TR with withdraw/disprove leaves), [1] P2A anchor
+/// - 2 outputs: [0] connector (P2TR with withdraw/disprove leaves), [1] operator anchor (P2TR key-spend)
 pub fn build_kickoff_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     operator: &Operator,
@@ -206,10 +206,10 @@ pub fn build_kickoff_tx(
         script_pubkey: ScriptBuf::new_p2tr_tweaked(connector_info.output_key()),
     };
 
-    // Output 1: P2A anchor for CPFP fee bumping
+    // Output 1: operator-keyed anchor for CPFP fee bumping (only operator can spend)
     let anchor_output = TxOut {
-        value: scripts::P2A_DUST,
-        script_pubkey: scripts::p2a_script(),
+        value: params.dust_amount,
+        script_pubkey: Address::p2tr(secp, operator.pubkey, None, Network::Bitcoin).script_pubkey(),
     };
 
     Ok(Transaction {

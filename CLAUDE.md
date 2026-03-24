@@ -56,10 +56,10 @@ Each `kickoffTx` consumes one triple of fanout leaf UTXOs (3 inputs), forcing th
 | `requestTx` | — | Depositor signs at deposit time | `SIGHASH_ALL` |
 | `cancelTx` | — | Depositor signs if cancelling | `SIGHASH_ALL` |
 | `depositTx` | Committee | Per deposit | `SIGHASH_ALL` |
-| `withdrawTx` (input 0) | Committee | Per deposit, n variants | `SIGHASH_ALL` |
+| `withdrawTx` (input 0) | Committee | Per deposit, n variants | `SIGHASH_NONE` |
 | `withdrawTx` (input 1) | — | Operator signs at claim time | `SIGHASH_ALL` |
 
-All `SIGHASH_ALL` — every tx is fully determined at sign time. The `kickoffTx` txid is deterministic because the Lamport signature is witness data (doesn't affect txid).
+All `SIGHASH_ALL` except `withdrawTx` input 0 which uses `SIGHASH_NONE` — this lets the operator choose outputs (and fees) at broadcast time while still committing to all inputs (outpoints, amounts, scriptPubKeys, sequences per BIP 341). The `kickoffTx` txid is deterministic because the Lamport signature is witness data (doesn't affect txid).
 
 ## Architecture Decisions
 
@@ -73,7 +73,7 @@ All `SIGHASH_ALL` — every tx is fully determined at sign time. The `kickoffTx`
 | Ethereum interaction | Typed events | No Ethereum deps; clean integration boundary |
 | Committee signing | Direct signing functions | `presign_deposit_tx()` / `presign_withdraw_input0()`; MuSig2 aggregation deferred to CLI/server layer |
 | Script execution | `BitcoinNetwork` enum | All verification through live bitcoind (`Regtest` mode). Chain monitoring via `broadcast_tx`, `get_raw_transaction`, `get_block_at_height`, `get_chain_tip`, `poll_new_blocks`. |
-| Anchor outputs | P2A on `depositTx` + `kickoffTx` + `withdrawTx` | Presigned txs need CPFP fee bumping |
+| Anchor outputs | Operator-keyed P2TR anchor on `kickoffTx` only | `kickoffTx` anchor is operator-keyed (prevents replacement cycling). `depositTx` has no anchor (fee set at presign time). `withdrawTx` uses `SIGHASH_NONE` on input 0 (operator sets fee via outputs) |
 | Dust outputs | `DUST_AMOUNT` = 546 sats | For non-value-bearing outputs (fanout, connector, disprove) |
 | Timelocks | Relative (`OP_CSV` + `nSequence`) | `cancelTx` uses `OP_CSV` in script; `withdrawTx` connector timelock enforced by `nSequence` committed in committee's presigned input0 |
 | Operator coordination | Out of scope | Economic incentive only; no explicit mechanism |
@@ -104,7 +104,7 @@ ideal-bridge/
 │       │   ├── cancel.rs
 │       │   ├── deposit.rs
 │       │   └── withdraw.rs
-│       ├── scripts.rs          # spending condition script builders + P2A helper
+│       ├── scripts.rs          # spending condition script builders
 │       ├── network.rs          # BitcoinNetwork: Regtest dispatch + chain monitoring
 │       └── regtest.rs          # bitcoind regtest node management
 ├── challenger/                 # standalone challenger monitoring client

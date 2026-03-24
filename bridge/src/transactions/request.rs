@@ -43,7 +43,7 @@ pub fn build_request_tx(
             witness: Witness::new(),
         }],
         output: vec![TxOut {
-            value: params.deposit_size + scripts::P2A_DUST,
+            value: params.request_input_value(),
             script_pubkey,
         }],
     })

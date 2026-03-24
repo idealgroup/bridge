@@ -5,7 +5,6 @@ use bitcoin::transaction::Transaction;
 use bridge::actor::Challenger;
 use bridge::engine::BitVMEngine;
 use bridge::params::Params;
-use bridge::scripts;
 use bridge::transactions::kickoff;
 use bridge::BridgeError;
 
@@ -60,17 +59,15 @@ impl<E: BitVMEngine> ChallengerClient<E> {
 
     /// Heuristic scan: returns candidate kickoff txs from a block.
     ///
-    /// A kickoff tx has exactly `lamport_chunks_per_slot` inputs
-    /// and output[1] matches the P2A script.
+    /// A kickoff tx has exactly `lamport_chunks_per_slot` inputs and 2 outputs.
+    /// Candidates are then validated by `extract_proof_from_kickoff`.
     pub fn scan_block_for_kickoffs(&self, block: &bitcoin::Block) -> Vec<Transaction> {
-        let p2a = scripts::p2a_script();
         block
             .txdata
             .iter()
             .filter(|tx| {
                 tx.input.len() == self.params.lamport_chunks_per_slot
                     && tx.output.len() == 2
-                    && tx.output[1].script_pubkey == p2a
             })
             .cloned()
             .collect()

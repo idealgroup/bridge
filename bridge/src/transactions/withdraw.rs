@@ -9,15 +9,13 @@ use bitcoin::{Address, Network, ScriptBuf, Txid, Witness};
 
 use crate::actor::Operator;
 use crate::params::Params;
-use crate::scripts;
 use crate::BridgeError;
 
 /// Builds a withdraw transaction.
 ///
-/// - Input 0: depositTx.out[0], key-spend presigned by committee
-/// - Input 1: kickoffTx.out[0] (connector), key-spend by operator
+/// - Input 0: depositTx.out[0], key-spend presigned by committee (SIGHASH_NONE)
+/// - Input 1: kickoffTx.out[0] (connector), key-spend by operator (SIGHASH_ALL)
 /// - Output 0: DEPOSIT_SIZE to operator
-/// - Output 1: P2A anchor (240 sats)
 pub fn build_withdraw_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     deposit_txid: Txid,
@@ -51,11 +49,6 @@ pub fn build_withdraw_tx(
                 value: params.deposit_size,
                 script_pubkey: operator_address.script_pubkey(),
             },
-            // P2A anchor for CPFP fee bumping
-            TxOut {
-                value: scripts::P2A_DUST,
-                script_pubkey: scripts::p2a_script(),
-            },
         ],
     })
 }
@@ -70,13 +63,13 @@ pub fn presign_withdraw_input0(
     let tweaked = committee_keypair.tap_tweak(secp, None);
     let mut cache = SighashCache::new(&*tx);
     let sighash = cache
-        .taproot_key_spend_signature_hash(0, &Prevouts::All(prevouts), TapSighashType::Default)
+        .taproot_key_spend_signature_hash(0, &Prevouts::All(prevouts), TapSighashType::None)
         .map_err(BridgeError::Sighash)?;
     let msg = Message::from_digest(*sighash.as_byte_array());
     let sig = secp.sign_schnorr_no_aux_rand(&msg, &tweaked.to_keypair());
     tx.input[0].witness = Witness::p2tr_key_spend(&bitcoin::taproot::Signature {
         signature: sig,
-        sighash_type: TapSighashType::Default,
+        sighash_type: TapSighashType::None,
     });
     Ok(())
 }
@@ -84,7 +77,8 @@ pub fn presign_withdraw_input0(
 /// Operator signs withdraw input 1 (key-spend on connector).
 ///
 /// The timelock is enforced by nSequence on this input, which the committee's
-/// presigned signature on input 0 commits to via SIGHASH_ALL.
+/// SIGHASH_NONE signature on input 0 still commits to (BIP 341: all input
+/// sequences are covered regardless of sighash type).
 pub fn sign_withdraw_input1(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     tx: &mut Transaction,
@@ -116,6 +110,7 @@ pub fn sign_withdraw_input1(
 mod tests {
     use super::*;
     use crate::actor::Committee;
+    use crate::scripts;
     use bitcoin::hashes::sha256;
     use bitcoin::OutPoint;
     use rand::rngs::StdRng;
@@ -147,7 +142,7 @@ mod tests {
 
         assert_eq!(tx.input.len(), 2);
         assert_eq!(tx.input[1].sequence, params.kickoff_timeout);
-        assert_eq!(tx.output.len(), 2);
+        assert_eq!(tx.output.len(), 1);
         assert_eq!(tx.output[0].value, params.deposit_size);
     }
 
@@ -239,7 +234,7 @@ mod tests {
         presign_withdraw_input0(&secp, &mut tx, &committee.keypair, &prevouts).unwrap();
 
         assert_eq!(tx.input[0].witness.len(), 1);
-        assert_eq!(tx.input[0].witness[0].len(), 64);
+        assert_eq!(tx.input[0].witness[0].len(), 65);
 
         // Also sign input 1 so the full tx is valid for regtest
         let connector_info = scripts::connector_spend_info(
@@ -432,6 +427,116 @@ mod tests {
             BITCOIN_NETWORK.broadcast_tx(&tx).is_err(),
             "wrong operator key should be rejected"
         );
+    }
+
+    /// Verify that the operator can modify outputs after committee presigns with SIGHASH_NONE.
+    /// The operator reduces output[0] to create a higher fee, then signs input 1.
+    #[test]
+    fn test_operator_adjusts_fee_via_sighash_none() {
+        let secp = Secp256k1::new();
+        let mut rng = StdRng::seed_from_u64(42);
+        let params = Params::test_defaults();
+
+        use crate::actor::Depositor;
+        use crate::network::BITCOIN_NETWORK;
+        use crate::transactions::{deposit, fanout, kickoff, request};
+
+        // Fund depositor
+        let request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, {
+            let dep_tmp = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
+            dep_tmp.pubkey
+        }, params.request_input_value()).unwrap();
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let depositor = Depositor::new(&mut rng, &secp, 0, request_utxo);
+        let committee = Committee::new(&mut rng, &secp);
+
+        let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
+
+        // Build request → deposit chain
+        let mut request_tx = request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
+        let depositor_prevout = TxOut {
+            value: params.request_input_value(),
+            script_pubkey: Address::p2tr(&secp, depositor.pubkey, None, Network::Bitcoin).script_pubkey(),
+        };
+        request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
+
+        let request_txid = request_tx.compute_txid();
+        let request_spend_info = scripts::request_spend_info(
+            &secp, committee.pubkey, depositor.pubkey,
+            depositor.deposit_secret_hash(), params.deposit_timeout,
+        ).unwrap();
+        let mut deposit_tx = deposit::build_deposit_tx(&secp, request_txid, &committee, &params).unwrap();
+        deposit::presign_deposit_tx(
+            &secp, &mut deposit_tx, &committee.keypair,
+            &request_spend_info, &[request_tx.output[0].clone()],
+        ).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
+
+        // Build fanout → kickoff chain
+        let mut tree = fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+        let init_txout = TxOut {
+            value: params.fanout_init_value(),
+            script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin).script_pubkey(),
+        };
+        fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
+            }
+        }
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
+
+        let slot = 0;
+        let disprove_hash = [0xaa; 32];
+        let mut kickoff_tx = kickoff::build_kickoff_tx(
+            &secp, &operator, slot, &tree, disprove_hash, &params,
+        ).unwrap();
+        let kickoff_prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
+        let msg = [0xbb; lamport::MSG_LEN];
+        let lamport_sig = operator.lamport_keys[slot].sign(&msg);
+        let lamport_pk = operator.lamport_pubkey(slot).unwrap();
+        kickoff::sign_kickoff_tx(
+            &secp, &mut kickoff_tx, &operator.keypair,
+            &lamport_sig, &lamport_pk, &kickoff_prevouts, &params,
+        ).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&kickoff_tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64).unwrap();
+
+        // Build withdraw tx and committee presigns input 0 (SIGHASH_NONE)
+        let deposit_txid = deposit_tx.compute_txid();
+        let kickoff_txid = kickoff_tx.compute_txid();
+        let mut tx = build_withdraw_tx(
+            &secp, deposit_txid, kickoff_txid, &operator, &params,
+        ).unwrap();
+
+        let prevouts = vec![deposit_tx.output[0].clone(), kickoff_tx.output[0].clone()];
+        presign_withdraw_input0(&secp, &mut tx, &committee.keypair, &prevouts).unwrap();
+
+        // Operator modifies outputs: reduce payout by 5000 sats to increase fee
+        let fee_bump = bitcoin::Amount::from_sat(5000);
+        tx.output[0].value = params.deposit_size - fee_bump;
+
+        // Operator signs input 1 with SIGHASH_ALL (commits to modified outputs)
+        let connector_info = scripts::connector_spend_info(
+            &secp, operator.pubkey, disprove_hash,
+        ).unwrap();
+        sign_withdraw_input1(
+            &secp, &mut tx, &operator.keypair,
+            &connector_info, &prevouts,
+        ).unwrap();
+
+        // Total input: deposit_size + dust_amount = 100546
+        // Total output: deposit_size - 5000 = 95000
+        // Fee: 5546 sats
+        assert_eq!(tx.output[0].value, params.deposit_size - fee_bump);
+
+        BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
     }
 
     // Note: OP_CSV test removed — the kickoff timeout is now enforced by nSequence

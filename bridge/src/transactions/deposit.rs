@@ -9,14 +9,12 @@ use bitcoin::{Address, Network, ScriptBuf, Txid, Witness};
 
 use crate::actor::Committee;
 use crate::params::Params;
-use crate::scripts;
 use crate::BridgeError;
 
 /// Builds a deposit transaction.
 ///
-/// - Input: requestTx.out[0], key-spend by committee (presigned)
+/// - Input: requestTx.out[0], key-spend by committee (presigned, fee set at presign time)
 /// - Output 0: DEPOSIT_SIZE, P2TR key-spend by committee
-/// - Output 1: P2A anchor (240 sats)
 pub fn build_deposit_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     request_txid: Txid,
@@ -34,17 +32,10 @@ pub fn build_deposit_tx(
             sequence: bitcoin::Sequence::ENABLE_RBF_NO_LOCKTIME,
             witness: Witness::new(),
         }],
-        output: vec![
-            TxOut {
-                value: params.deposit_size,
-                script_pubkey: committee_address.script_pubkey(),
-            },
-            // P2A anchor for CPFP fee bumping
-            TxOut {
-                value: scripts::P2A_DUST,
-                script_pubkey: scripts::p2a_script(),
-            },
-        ],
+        output: vec![TxOut {
+            value: params.deposit_size,
+            script_pubkey: committee_address.script_pubkey(),
+        }],
     })
 }
 
@@ -90,7 +81,7 @@ mod tests {
         let tx = build_deposit_tx(&secp, request_txid, &committee, &params).unwrap();
 
         assert_eq!(tx.input.len(), 1);
-        assert_eq!(tx.output.len(), 2);
+        assert_eq!(tx.output.len(), 1);
         assert_eq!(tx.output[0].value, params.deposit_size);
     }
 
