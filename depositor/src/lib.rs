@@ -50,18 +50,4 @@ impl DepositorClient {
         )
     }
 
-    /// Store a presigned depositTx from the committee.
-    pub fn receive_presigned_deposit(&mut self, tx: Transaction) {
-        self.depositor.receive_presigned_deposit(tx);
-    }
-
-    /// Store a presigned withdrawTx (committee-signed input 0) for a given operator.
-    pub fn receive_presigned_withdraw(
-        &mut self,
-        operator_index: usize,
-        tx: Transaction,
-    ) -> Result<(), BridgeError> {
-        self.depositor
-            .receive_presigned_withdraw(operator_index, tx)
-    }
 }

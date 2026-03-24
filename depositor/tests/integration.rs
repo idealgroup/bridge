@@ -1,9 +1,7 @@
-use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::transaction::TxOut;
-use bitcoin::ScriptBuf;
 
-use bridge::actor::{Committee, Depositor, Operator};
+use bridge::actor::{Committee, Depositor};
 use bridge::network::BITCOIN_NETWORK;
 use bridge::params::Params;
 use bridge::scripts;
@@ -141,87 +139,3 @@ fn test_depositor_cancel_before_timeout_rejected() {
     );
 }
 
-/// Full happy path: depositor creates request, committee presigns deposit + withdraw,
-/// depositor receives and stores both presigned transactions.
-#[test]
-fn test_depositor_receives_presigned_deposit_and_withdraw() {
-    let secp = Secp256k1::new();
-    let params = Params::test_defaults();
-    let mut rng = test_rng_seeded(77);
-
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
-    let committee = Committee::new(&mut rng, &secp);
-    let mut operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
-    operator.init_utxo =
-        BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
-
-    let request_utxo =
-        BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
-
-    let mut client = DepositorClient::new(depositor, params.clone());
-
-    // --- Depositor creates request ---
-    let request_tx = client
-        .create_request(committee.pubkey, request_utxo)
-        .unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
-    let request_txid = request_tx.compute_txid();
-
-    // --- Committee presigns deposit ---
-    let deposit_tx = committee
-        .presign_deposit(
-            &secp,
-            request_txid,
-            &client.depositor,
-            &request_tx.output[0],
-            &params,
-        )
-        .unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
-    let deposit_txid = deposit_tx.compute_txid();
-
-    // --- Depositor stores presigned deposit ---
-    client.receive_presigned_deposit(deposit_tx.clone());
-    assert!(client.depositor.presigned_deposit.is_some());
-
-    // --- Operator builds fanout tree (needed for deterministic kickoff txid) ---
-    let init_txout = TxOut {
-        value: params.fanout_init_value(),
-        script_pubkey: bitcoin::Address::p2tr(&secp, operator.pubkey, None, bitcoin::Network::Bitcoin)
-            .script_pubkey(),
-    };
-    operator.create_fanout_tree(&secp, &init_txout, &params).unwrap();
-
-    // --- Committee presigns withdraw ---
-    let slot = 0;
-    let disprove_hash = sha256::Hash::hash(&[0xab; 20]).to_byte_array();
-    let kickoff_txid = operator
-        .kickoff_txid(&secp, slot, disprove_hash, &params)
-        .unwrap();
-    let connector_info =
-        scripts::connector_spend_info(&secp, operator.pubkey, disprove_hash).unwrap();
-    let connector_output = TxOut {
-        value: params.dust_amount,
-        script_pubkey: ScriptBuf::new_p2tr_tweaked(connector_info.output_key()),
-    };
-    let withdraw_prevouts = vec![deposit_tx.output[0].clone(), connector_output];
-
-    let presigned_withdraw = committee
-        .presign_withdraw(
-            &secp,
-            deposit_txid,
-            kickoff_txid,
-            &operator,
-            &withdraw_prevouts,
-            &params,
-        )
-        .unwrap();
-
-    // --- Depositor stores presigned withdraw for operator 0 ---
-    client
-        .receive_presigned_withdraw(0, presigned_withdraw)
-        .unwrap();
-    assert!(client.depositor.presigned_withdraws[0].is_some());
-}

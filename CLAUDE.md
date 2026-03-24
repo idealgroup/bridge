@@ -105,6 +105,7 @@ ideal-bridge/
 │       │   ├── deposit.rs
 │       │   └── withdraw.rs
 │       ├── scripts.rs          # spending condition script builders
+│       ├── test_support.rs     # shared test helpers (test_rng, dummy_outpoint)
 │       ├── network.rs          # BitcoinNetwork: Regtest dispatch + chain monitoring
 │       └── regtest.rs          # bitcoind regtest node management
 ├── challenger/                 # standalone challenger monitoring client
@@ -122,9 +123,9 @@ ideal-bridge/
 ├── depositor/                  # standalone depositor client
 │   ├── Cargo.toml
 │   ├── src/
-│   │   ├── lib.rs              # DepositorClient: create_request, create_cancel, receive presigned txs
+│   │   ├── lib.rs              # DepositorClient: create_request, create_cancel
 │   │   └── main.rs             # placeholder
-│   └── tests/integration.rs    # 4 tests: request, cancel, cancel-before-timeout rejected, presigned rx
+│   └── tests/integration.rs    # 3 tests: request, cancel, cancel-before-timeout rejected
 ├── e2e/                        # end-to-end integration tests across all actor clients
 │   ├── Cargo.toml
 │   └── tests/e2e.rs            # 3 tests: happy path withdraw, cancel escape hatch, fraud proof disprove

@@ -69,10 +69,7 @@ fn test_happy_path_deposit_and_withdraw() {
     network.mine_blocks(1).unwrap();
     let deposit_txid = deposit_tx.compute_txid();
 
-    // === 3. Depositor stores presigned deposit ===
-    dep_client.receive_presigned_deposit(deposit_tx.clone());
-
-    // === 4. Compute deterministic kickoff txid (lazily builds fanout tree) ===
+    // === 3. Compute deterministic kickoff txid (lazily builds fanout tree) ===
     let slot = 0;
     let disprove_hash = [0xaa; 32];
     let kickoff_txid = op_client.kickoff_txid(slot, disprove_hash).unwrap();
@@ -98,12 +95,9 @@ fn test_happy_path_deposit_and_withdraw() {
         )
         .unwrap();
 
-    // Hand presigned withdraw to operator and depositor
+    // Hand presigned withdraw to operator
     op_client
-        .receive_presigned_withdraw(presigned_withdraw.clone())
-        .unwrap();
-    dep_client
-        .receive_presigned_withdraw(0, presigned_withdraw)
+        .receive_presigned_withdraw(presigned_withdraw)
         .unwrap();
 
     // === 8. Operator creates and broadcasts kickoff (with fanout path) ===

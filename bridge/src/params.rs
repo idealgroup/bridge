@@ -90,7 +90,11 @@ impl Params {
         }
         // Each leaf tx handles `branching` slots, and there are branching^(depth-1)
         // leaf txs, so total capacity = branching^depth.
-        let capacity = self.fanout_branching.pow(self.fanout_depth as u32);
+        let capacity = self.fanout_branching
+            .checked_pow(self.fanout_depth as u32)
+            .ok_or_else(|| crate::BridgeError::InvalidParams(
+                "fanout_branching^fanout_depth overflows".into(),
+            ))?;
         if capacity < self.deposit_count {
             return Err(crate::BridgeError::InvalidParams(format!(
                 "fanout_branching^fanout_depth = {} < deposit_count {}",

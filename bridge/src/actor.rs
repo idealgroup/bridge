@@ -29,9 +29,6 @@ pub struct Depositor {
     pub index: usize,
     pub request_utxo: OutPoint,
     pub deposit_secret: [u8; 32],
-    pub presigned_deposit: Option<Transaction>,
-    /// Presigned withdrawTxs (committee-signed input 0), indexed by operator.
-    pub presigned_withdraws: Vec<Option<Transaction>>,
 }
 
 pub struct Committee {
@@ -211,8 +208,6 @@ impl Depositor {
             index,
             request_utxo,
             deposit_secret,
-            presigned_deposit: None,
-            presigned_withdraws: Vec::new(),
         }
     }
 
@@ -269,23 +264,6 @@ impl Depositor {
         Ok(tx)
     }
 
-    /// Store a presigned depositTx from the committee.
-    pub fn receive_presigned_deposit(&mut self, tx: Transaction) {
-        self.presigned_deposit = Some(tx);
-    }
-
-    /// Store a presigned withdrawTx (committee-signed input 0) for a given operator.
-    pub fn receive_presigned_withdraw(
-        &mut self,
-        operator_index: usize,
-        tx: Transaction,
-    ) -> Result<(), BridgeError> {
-        if self.presigned_withdraws.len() <= operator_index {
-            self.presigned_withdraws.resize(operator_index + 1, None);
-        }
-        self.presigned_withdraws[operator_index] = Some(tx);
-        Ok(())
-    }
 }
 
 impl Committee {
@@ -414,8 +392,6 @@ mod tests {
         let dep = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
         let hash = dep.deposit_secret_hash();
         assert_eq!(hash.len(), 32);
-        assert!(dep.presigned_deposit.is_none());
-        assert!(dep.presigned_withdraws.is_empty());
         // Deterministic
         let mut rng2 = test_rng();
         let dep2 = Depositor::new(&mut rng2, &secp, 0, dummy_outpoint());
@@ -462,10 +438,6 @@ mod tests {
 
         BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
         BITCOIN_NETWORK.mine_blocks(1).unwrap();
-
-        // Depositor stores it
-        depositor.receive_presigned_deposit(deposit_tx);
-        assert!(depositor.presigned_deposit.is_some());
     }
 
     #[test]
@@ -603,12 +575,9 @@ mod tests {
             )
             .unwrap();
 
-        // 5. Distribute presigned withdraw to operator and depositor
+        // 5. Hand presigned withdraw to operator
         operator
-            .receive_presigned_withdraw(presigned_withdraw.clone())
-            .unwrap();
-        depositor
-            .receive_presigned_withdraw(0, presigned_withdraw)
+            .receive_presigned_withdraw(presigned_withdraw)
             .unwrap();
 
         // 6. Confirm fanout tree on-chain
