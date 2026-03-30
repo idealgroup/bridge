@@ -4,7 +4,9 @@ use bitcoin::key::{Keypair, TapTweak};
 use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
-use bitcoin::{ScriptBuf, Witness};
+use bitcoin::opcodes::all::OP_RETURN;
+use bitcoin::script::Builder;
+use bitcoin::{Amount, ScriptBuf, Witness};
 
 use bitcoin::key::UntweakedPublicKey as XOnlyPublicKey;
 
@@ -16,7 +18,8 @@ use bridge::BridgeError;
 /// Builds a request transaction.
 ///
 /// - Input: depositor's `request_utxo` (signed by depositor at broadcast time)
-/// - Output: `DEPOSIT_SIZE` locked in P2TR (committee key-spend + cancel script leaf)
+/// - Output 0: `DEPOSIT_SIZE` locked in P2TR (committee key-spend + cancel script leaf)
+/// - Output 1: OP_RETURN with 32-byte Starknet recipient address
 pub fn build_request_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     depositor: &Depositor,
@@ -33,6 +36,12 @@ pub fn build_request_tx(
 
     let script_pubkey = ScriptBuf::new_p2tr_tweaked(spend_info.output_key());
 
+    // OP_RETURN output with 32-byte Starknet address
+    let op_return_script = Builder::new()
+        .push_opcode(OP_RETURN)
+        .push_slice(depositor.starknet_address)
+        .into_script();
+
     Ok(Transaction {
         version: Version::TWO,
         lock_time: LockTime::ZERO,
@@ -42,10 +51,16 @@ pub fn build_request_tx(
             sequence: bitcoin::Sequence::ENABLE_RBF_NO_LOCKTIME,
             witness: Witness::new(),
         }],
-        output: vec![TxOut {
-            value: params.request_input_value(),
-            script_pubkey,
-        }],
+        output: vec![
+            TxOut {
+                value: params.request_input_value(),
+                script_pubkey,
+            },
+            TxOut {
+                value: Amount::ZERO,
+                script_pubkey: op_return_script,
+            },
+        ],
     })
 }
 
@@ -75,7 +90,7 @@ mod tests {
     use super::*;
     use bridge::actor::{Committee, Depositor};
     use bridge::params::Params;
-    use bitcoin::{Address, Network, OutPoint, Txid};
+    use bitcoin::{Address, Amount, Network, OutPoint, Txid};
     use bitcoin::hashes::Hash;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -95,8 +110,10 @@ mod tests {
 
         let tx = build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         assert_eq!(tx.input.len(), 1);
-        assert_eq!(tx.output.len(), 1);
+        assert_eq!(tx.output.len(), 2);
         assert_eq!(tx.output[0].value, params.request_input_value());
+        assert_eq!(tx.output[1].value, Amount::ZERO);
+        assert!(tx.output[1].script_pubkey.is_op_return());
     }
 
     #[test]

@@ -28,8 +28,9 @@ fn test_depositor_creates_request() {
         .create_request(committee.pubkey, request_utxo)
         .unwrap();
 
-    assert_eq!(request_tx.output.len(), 1);
+    assert_eq!(request_tx.output.len(), 2);
     assert_eq!(request_tx.output[0].value, params.request_input_value());
+    assert!(request_tx.output[1].script_pubkey.is_op_return());
 
     BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
     BITCOIN_NETWORK.mine_blocks(1).unwrap();
