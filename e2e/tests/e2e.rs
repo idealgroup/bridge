@@ -11,6 +11,7 @@ use bridge::scripts;
 use bridge::test_support::{test_rng_seeded, dummy_outpoint};
 
 use challenger::ChallengerClient;
+use committee::CommitteeClient;
 use depositor::DepositorClient;
 use operator::OperatorClient;
 
@@ -21,7 +22,7 @@ fn fresh_network() -> BitcoinNetwork {
 
 /// Full deposit -> withdraw cycle. Each actor uses only its own client API.
 ///
-/// DepositorClient creates request, Committee presigns deposit + withdraw,
+/// DepositorClient creates request, CommitteeClient presigns deposit + withdraw,
 /// OperatorClient builds fanout + kickoff, waits timeout, completes withdraw.
 #[test]
 fn test_happy_path_deposit_and_withdraw() {
@@ -43,26 +44,25 @@ fn test_happy_path_deposit_and_withdraw() {
 
     // === Wrap in client APIs ===
     let mut dep_client = DepositorClient::new(depositor, params.clone());
+    let committee_client = CommitteeClient::new(committee, params.clone());
     let mut op_operator = operator;
     op_operator.init_utxo = operator_init_utxo;
     let mut op_client = OperatorClient::new(op_operator, params.clone());
 
     // === 1. Depositor creates request ===
     let request_tx = dep_client
-        .create_request(committee.pubkey, request_utxo)
+        .create_request(committee_client.committee.pubkey, request_utxo)
         .unwrap();
     network.broadcast_tx(&request_tx).unwrap();
     network.mine_blocks(1).unwrap();
     let request_txid = request_tx.compute_txid();
 
     // === 2. Committee presigns deposit ===
-    let deposit_tx = committee
+    let deposit_tx = committee_client
         .presign_deposit(
-            &secp,
             request_txid,
             &dep_client.depositor,
             &request_tx.output[0],
-            &params,
         )
         .unwrap();
     network.broadcast_tx(&deposit_tx).unwrap();
@@ -84,14 +84,12 @@ fn test_happy_path_deposit_and_withdraw() {
     let withdraw_prevouts = vec![deposit_tx.output[0].clone(), connector_output];
 
     // === 7. Committee presigns withdraw ===
-    let presigned_withdraw = committee
+    let presigned_withdraw = committee_client
         .presign_withdraw(
-            &secp,
             deposit_txid,
             kickoff_txid,
-            &op_client.operator,
+            op_client.operator.pubkey,
             &withdraw_prevouts,
-            &params,
         )
         .unwrap();
 
@@ -205,26 +203,25 @@ fn test_fraud_proof_disprove() {
 
     // === Wrap in client APIs ===
     let mut dep_client = DepositorClient::new(depositor, params.clone());
+    let committee_client = CommitteeClient::new(committee, params.clone());
     let mut op_operator = operator;
     op_operator.init_utxo = operator_init_utxo;
     let mut op_client = OperatorClient::new(op_operator, params.clone());
 
     // === 1. Depositor creates request ===
     let request_tx = dep_client
-        .create_request(committee.pubkey, request_utxo)
+        .create_request(committee_client.committee.pubkey, request_utxo)
         .unwrap();
     network.broadcast_tx(&request_tx).unwrap();
     network.mine_blocks(1).unwrap();
     let request_txid = request_tx.compute_txid();
 
     // === 2. Committee presigns deposit ===
-    let deposit_tx = committee
+    let deposit_tx = committee_client
         .presign_deposit(
-            &secp,
             request_txid,
             &dep_client.depositor,
             &request_tx.output[0],
-            &params,
         )
         .unwrap();
     network.broadcast_tx(&deposit_tx).unwrap();
@@ -255,14 +252,12 @@ fn test_fraud_proof_disprove() {
     };
     let withdraw_prevouts = vec![deposit_tx.output[0].clone(), connector_output];
 
-    let presigned_withdraw = committee
+    let presigned_withdraw = committee_client
         .presign_withdraw(
-            &secp,
             deposit_txid,
             kickoff_txid,
-            &op_client.operator,
+            op_client.operator.pubkey,
             &withdraw_prevouts,
-            &params,
         )
         .unwrap();
     op_client

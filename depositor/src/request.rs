@@ -8,10 +8,10 @@ use bitcoin::{ScriptBuf, Witness};
 
 use bitcoin::key::UntweakedPublicKey as XOnlyPublicKey;
 
-use crate::actor::Depositor;
-use crate::params::Params;
-use crate::scripts;
-use crate::BridgeError;
+use bridge::actor::Depositor;
+use bridge::params::Params;
+use bridge::scripts;
+use bridge::BridgeError;
 
 /// Builds a request transaction.
 ///
@@ -73,9 +73,10 @@ pub fn sign_request_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actor::{Committee, Depositor};
-    use crate::params::Params;
+    use bridge::actor::{Committee, Depositor};
+    use bridge::params::Params;
     use bitcoin::{Address, Network, OutPoint, Txid};
+    use bitcoin::hashes::Hash;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -104,7 +105,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
 
-        use crate::network::BITCOIN_NETWORK;
+        use bridge::network::BITCOIN_NETWORK;
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
         depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);

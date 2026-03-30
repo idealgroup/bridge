@@ -8,6 +8,8 @@ use bridge::params::Params;
 use bridge::scripts;
 use bridge::test_support::{test_rng_seeded, dummy_outpoint};
 
+use committee::CommitteeClient;
+use depositor::DepositorClient;
 use operator::OperatorClient;
 
 /// Operator builds fanout tree, broadcasts, creates kickoff, confirms on-chain.
@@ -49,12 +51,13 @@ fn test_operator_completes_withdraw() {
     let mut rng = test_rng_seeded(99);
 
     // === Depositor setup (independent actor) ===
-    let mut depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
-    depositor.request_utxo =
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+    let request_utxo =
         BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
 
     // === Committee setup (independent actor) ===
     let committee = Committee::new(&mut rng, &secp);
+    let committee_client = CommitteeClient::new(committee, params.clone());
 
     // === Operator client setup (independent actor) ===
     let mut operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
@@ -63,21 +66,20 @@ fn test_operator_completes_withdraw() {
     let mut client = OperatorClient::new(operator, params.clone());
 
     // --- Depositor creates request (on-chain) ---
-    let request_tx = depositor
-        .create_request(&secp, committee.pubkey, &params)
+    let mut dep_client = DepositorClient::new(depositor, params.clone());
+    let request_tx = dep_client
+        .create_request(committee_client.committee.pubkey, request_utxo)
         .unwrap();
     BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
     BITCOIN_NETWORK.mine_blocks(1).unwrap();
     let request_txid = request_tx.compute_txid();
 
     // --- Committee presigns deposit (on-chain) ---
-    let deposit_tx = committee
+    let deposit_tx = committee_client
         .presign_deposit(
-            &secp,
             request_txid,
-            &depositor,
+            &dep_client.depositor,
             &request_tx.output[0],
-            &params,
         )
         .unwrap();
     BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
@@ -101,14 +103,12 @@ fn test_operator_completes_withdraw() {
     let withdraw_prevouts = vec![deposit_tx.output[0].clone(), connector_output];
 
     // --- Committee presigns withdraw (message passing: knows operator pubkey + kickoff_txid) ---
-    let presigned_withdraw = committee
+    let presigned_withdraw = committee_client
         .presign_withdraw(
-            &secp,
             deposit_txid,
             kickoff_txid,
-            &client.operator,
+            client.operator.pubkey,
             &withdraw_prevouts,
-            &params,
         )
         .unwrap();
 

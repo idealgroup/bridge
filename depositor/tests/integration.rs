@@ -79,7 +79,7 @@ fn test_depositor_cancel_after_timeout() {
 #[test]
 fn test_depositor_cancel_before_timeout_rejected() {
     use bitcoin::blockdata::transaction::Sequence;
-    use bridge::transactions::{cancel, request};
+    use depositor::{cancel, request};
 
     let secp = Secp256k1::new();
     let params = Params::test_defaults();

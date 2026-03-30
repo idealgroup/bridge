@@ -227,6 +227,7 @@ dependencies = [
  "bitcoincore-rpc",
  "bridge",
  "lamport",
+ "operator",
  "rand",
 ]
 
@@ -277,6 +278,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
+name = "committee"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "bridge",
+ "rand",
+]
+
+[[package]]
 name = "console_error_panic_hook"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -302,6 +312,7 @@ dependencies = [
  "bitcoin",
  "bridge",
  "challenger",
+ "committee",
  "depositor",
  "lamport",
  "operator",
@@ -529,6 +540,8 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "bridge",
+ "committee",
+ "depositor",
  "lamport",
  "rand",
 ]

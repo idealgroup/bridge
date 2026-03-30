@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 bridge = { path = "../bridge" }
+committee = { path = "../committee" }
 operator = { path = "../operator" }
 depositor = { path = "../depositor" }
 challenger = { path = "../challenger" }

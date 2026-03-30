@@ -1,14 +1,11 @@
 [package]
-name = "operator"
+name = "committee"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 bridge = { path = "../bridge" }
-lamport = { path = "../lamport" }
 bitcoin = "0.32"
 
 [dev-dependencies]
 rand = "0.8"
-committee = { path = "../committee" }
-depositor = { path = "../depositor" }

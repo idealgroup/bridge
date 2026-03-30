@@ -1,8 +1,6 @@
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::transaction::TxOut;
 use bitcoin::{Address, Network, OutPoint, Txid};
-use rand::rngs::StdRng;
 
 use bridge::actor::Operator;
 use bridge::engine::MockEngine;
@@ -11,6 +9,7 @@ use bridge::regtest::RegtestNode;
 use bridge::test_support::test_rng_seeded;
 
 use challenger::ChallengerClient;
+use operator::OperatorClient;
 
 /// Start a fresh isolated regtest node for a single test.
 fn fresh_node() -> RegtestNode {
@@ -19,48 +18,45 @@ fn fresh_node() -> RegtestNode {
     node
 }
 
-/// Helper: create operator with funded UTXO, build+sign+confirm fanout tree.
-fn setup_operator_with_fanout(
-    secp: &Secp256k1<bitcoin::secp256k1::All>,
-    rng: &mut StdRng,
+/// Helper: create operator, build kickoff for given slot/proof, broadcast everything.
+/// Returns the kickoff tx (last in the returned vec).
+fn setup_and_broadcast_kickoff(
     node: &RegtestNode,
     params: &Params,
-) -> Operator {
-    let mut operator =
-        Operator::new(rng, secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
+    slot: usize,
+    disprove_hash: [u8; 32],
+    proof_msg: &[u8; lamport::MSG_LEN],
+) {
+    let secp = Secp256k1::new();
+    let mut rng = test_rng_seeded(99);
 
-    let addr = Address::p2tr(secp, operator.pubkey, None, Network::Regtest);
+    let mut operator = Operator::new(
+        &mut rng,
+        &secp,
+        OutPoint::new(Txid::all_zeros(), 0),
+        params.deposit_count,
+    );
+
+    let addr = Address::p2tr(&secp, operator.pubkey, None, Network::Regtest);
     operator.init_utxo = node
         .fund_address(&addr, params.fanout_init_value())
         .expect("fund operator");
 
-    let init_txout = TxOut {
-        value: params.fanout_init_value(),
-        script_pubkey: Address::p2tr(secp, operator.pubkey, None, Network::Bitcoin).script_pubkey(),
-    };
-    operator
-        .create_fanout_tree(secp, &init_txout, params)
+    let mut client = OperatorClient::new(operator, params.clone());
+    let txs = client
+        .create_kickoff(slot, disprove_hash, proof_msg)
         .unwrap();
 
-    for level in &operator.fanout_tree.as_ref().unwrap().levels {
-        for tx in level {
-            node.send_transaction(tx).unwrap();
-        }
+    for tx in &txs {
+        node.send_transaction(tx).unwrap();
     }
     node.mine_blocks(1).unwrap();
-
-    operator
 }
 
 #[test]
 fn test_challenger_detects_and_disproves_invalid_proof() {
-    let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng_seeded(99);
     let node = fresh_node();
-
-    // Operator side: setup fanout
-    let operator = setup_operator_with_fanout(&secp, &mut rng, &node, &params);
 
     // Create kickoff with an invalid proof (proof[0] = 0xFF triggers MockEngine disprove)
     let slot = 0;
@@ -75,11 +71,7 @@ fn test_challenger_detects_and_disproves_invalid_proof() {
     };
     let disprove_hash = sha256::Hash::hash(&disprove_secret).to_byte_array();
 
-    let kickoff_tx = operator
-        .create_kickoff(&secp, slot, disprove_hash, &proof_msg, &params)
-        .unwrap();
-    node.send_transaction(&kickoff_tx).unwrap();
-    node.mine_blocks(1).unwrap();
+    setup_and_broadcast_kickoff(&node, &params, slot, disprove_hash, &proof_msg);
 
     // Challenger side: scan the tip block for kickoffs
     use bitcoincore_rpc::RpcApi;
@@ -101,12 +93,8 @@ fn test_challenger_detects_and_disproves_invalid_proof() {
 
 #[test]
 fn test_challenger_ignores_valid_proof() {
-    let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng_seeded(99);
     let node = fresh_node();
-
-    let operator = setup_operator_with_fanout(&secp, &mut rng, &node, &params);
 
     // Valid proof: proof[0] = 0x00
     let slot = 0;
@@ -115,11 +103,7 @@ fn test_challenger_ignores_valid_proof() {
     // For valid proof, MockEngine returns None, so we can use any disprove_hash
     let disprove_hash = [0xaa; 32];
 
-    let kickoff_tx = operator
-        .create_kickoff(&secp, slot, disprove_hash, &proof_msg, &params)
-        .unwrap();
-    node.send_transaction(&kickoff_tx).unwrap();
-    node.mine_blocks(1).unwrap();
+    setup_and_broadcast_kickoff(&node, &params, slot, disprove_hash, &proof_msg);
 
     // Challenger side: scan the tip block
     use bitcoincore_rpc::RpcApi;
@@ -137,12 +121,8 @@ fn test_challenger_ignores_valid_proof() {
 
 #[test]
 fn test_challenger_scan_block_finds_kickoff() {
-    let secp = Secp256k1::new();
     let params = Params::test_defaults();
-    let mut rng = test_rng_seeded(99);
     let node = fresh_node();
-
-    let operator = setup_operator_with_fanout(&secp, &mut rng, &node, &params);
 
     let slot = 0;
     let mut proof_msg = [0u8; lamport::MSG_LEN];
@@ -155,11 +135,7 @@ fn test_challenger_scan_block_finds_kickoff() {
     };
     let disprove_hash = sha256::Hash::hash(&disprove_secret).to_byte_array();
 
-    let kickoff_tx = operator
-        .create_kickoff(&secp, slot, disprove_hash, &proof_msg, &params)
-        .unwrap();
-    node.send_transaction(&kickoff_tx).unwrap();
-    node.mine_blocks(1).unwrap();
+    setup_and_broadcast_kickoff(&node, &params, slot, disprove_hash, &proof_msg);
 
     // Challenger side: scan the tip block
     use bitcoincore_rpc::RpcApi;

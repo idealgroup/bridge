@@ -11,3 +11,4 @@ bitcoin = "0.32"
 [dev-dependencies]
 bitcoincore-rpc = "0.19"
 rand = "0.8"
+operator = { path = "../operator" }
