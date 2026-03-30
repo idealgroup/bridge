@@ -42,10 +42,13 @@
 % --- requestTx  (x: 0 .. 5.6) ---
 \node[txname] at (0, 10.7) {requestTx};
 \draw[thick] (0, 10.6) -- (5.6, 10.6);           % top border
-\draw[thick] (2.8, 10.6) -- (2.8, 9.0);           % divider
+\draw[thick] (2.8, 10.6) -- (2.8, 8.0);           % divider (extended for OP_RETURN row)
 
 \node[align=center] at (1.4, 9.8) {1\,BTC\\[-1pt]{\small Depositor}};
 \node[align=center] at (4.2, 9.8) {1\,BTC\\[-1pt]{\small n-of-n}};
+\draw[thick] (2.8, 9.0) -- (5.6, 9.0);            % right col row divider
+\node[align=center, font=\small] at (4.2, 8.5)
+  {OP\_RETURN\\[-1pt]{\scriptsize Starknet addr}};
 
 % Depositor funds requestTx (enter left col)
 \draw[plain] (-2.5, 9.8) -- (0, 9.8);
