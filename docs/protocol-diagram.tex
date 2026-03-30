@@ -173,46 +173,48 @@
 
 
 % ══════════════════════════════════════════════════════
-%  ETHEREUM  (not implemented)
+%  STARKNET
 % ══════════════════════════════════════════════════════
 
 \draw[thick, dashed, black!25] (-3, 2.5) -- (37, 2.5);
 \node[font=\itshape\small, text=black!30, fill=white, inner sep=3pt]
   at (17, 2.5) {chain boundary};
 
-\node[font=\bfseries\small, text=cGrey, anchor=west]
-  at (-2.5, 1.6) {ETHEREUM};
+\node[font=\bfseries\small, anchor=west]
+  at (-2.5, 1.6) {STARKNET};
+
+% Minting Contract (ERC20)
+\node[font=\bfseries\normalsize, anchor=south west]
+  at (1, 1.0) {MintingContract {\small (ERC20)}};
+\draw[thick] (1, 0.9) rectangle (15, -2.6);
+\node[font=\scriptsize, anchor=north west, align=left, text width=13cm]
+  at (1.3, 0.7) {%
+  \textbullet\; \texttt{request(raw\_request\_tx, H(S), $\sigma_1$\_rx, $\sigma_1$\_s)}
+    \enspace {\tiny verifies BIP340 sig on depositTx sighash}\\[1pt]
+  \textbullet\; \texttt{mint(H(S))}
+    \enspace {\tiny after mint\_delay, mints wBTC to recipient from OP\_RETURN}\\[1pt]
+  \textbullet\; \texttt{cancel(S\textsubscript{depositor})}
+    \enspace {\tiny reveals preimage, blocks mint}};
+
+% Burn Contract (not yet implemented)
+\node[font=\bfseries\normalsize, text=cGrey, anchor=south west]
+  at (20, 1.0) {BurnContract};
 \node[font=\scriptsize, text=cGrey!70,
   draw=cGrey!40, dashed, rounded corners=2pt,
-  inner sep=3pt, anchor=west] at (1.5, 1.6)
+  inner sep=3pt, anchor=west] at (24.5, 1.2)
   {not yet implemented};
-
-% Minting Contract
-\node[font=\bfseries\normalsize, text=cGrey, anchor=south west]
-  at (1, 1.0) {Minting Contract};
-\draw[thick, dashed, black!30] (1, 0.9) rectangle (8.5, -2.0);
-\node[font=\scriptsize, text=cGrey, anchor=north west, align=left]
-  at (1.3, 0.7) {%
-  \textbullet\; \texttt{request($\theta_1$, H(S\textsubscript{depositor}))}\\[1pt]
-  \textbullet\; \texttt{mint(depositorId, 1\,wBTC)}\\[1pt]
-  \textbullet\; \texttt{cancel(S\textsubscript{depositor})}\\[1pt]
-  \textbullet\; \texttt{happyMint($\theta_2$)}};
-
-% Burn Contract
-\node[font=\bfseries\normalsize, text=cGrey, anchor=south west]
-  at (16, 1.0) {Burn Contract};
-\draw[thick, dashed, black!30] (16, 0.9) rectangle (24, -0.8);
-\node[font=\scriptsize, text=cGrey, anchor=north west, align=left]
-  at (16.3, 0.7) {%
-  \textbullet\; \texttt{burn(operator\_id, wBTC,}\\
-  \phantom{\textbullet\;} \texttt{utxo\_index)}};
+\draw[thick, dashed, black!30] (20, 0.9) rectangle (34, -1.2);
+\node[font=\scriptsize, text=cGrey, anchor=north west, align=left, text width=13cm]
+  at (20.3, 0.7) {%
+  \textbullet\; \texttt{burn(amount)}
+    \enspace {\tiny burns wBTC, initiates BTC withdrawal}};
 
 % wBTC arrow
 \draw[thick, dashed, cGrey!40,
   {Stealth[length=4pt]}-{Stealth[length=4pt]}]
-  (8.5, -0.5) --
+  (15, -0.8) --
   node[font=\tiny, text=cGrey, above]{wBTC}
-  (16, -0.5);
+  (20, -0.8);
 
 % Cross-chain: cancel → cancels mint
 \draw[dashed, cRed!30, -{Stealth[length=4pt]}]
