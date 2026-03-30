@@ -95,10 +95,6 @@ ideal-bridge/
 │       ├── params.rs           # configurable constants
 │       ├── actor.rs            # data-only actor structs (Operator, Depositor, Committee, Challenger) — key material + constructors, no tx methods
 │       ├── engine.rs           # BitVMEngine trait + MockEngine
-│       ├── transactions/       # shared tx types (no build/sign logic)
-│       │   ├── mod.rs
-│       │   ├── fanout.rs       # FanoutTree struct + utility methods (leaf_outpoint, path_to_slot, kickoff_prevouts)
-│       │   └── kickoff.rs      # KickoffData + extract_proof_from_kickoff (witness parsing)
 │       ├── scripts.rs          # spending condition script builders
 │       ├── test_support.rs     # shared test helpers (test_rng, dummy_outpoint)
 │       ├── network.rs          # BitcoinNetwork: Regtest dispatch + chain monitoring
@@ -114,7 +110,7 @@ ideal-bridge/
 │   ├── Cargo.toml
 │   ├── src/
 │   │   ├── lib.rs              # OperatorClient: create_fanout_tree, create_kickoff, complete_withdraw
-│   │   ├── fanout.rs           # build_fanout_tree, sign_fanout_tree
+│   │   ├── fanout.rs           # FanoutTree struct + build_fanout_tree, sign_fanout_tree
 │   │   ├── kickoff.rs          # build_kickoff_tx, sign_kickoff_tx
 │   │   ├── withdraw.rs         # sign_withdraw_input1
 │   │   └── main.rs             # placeholder
@@ -127,10 +123,11 @@ ideal-bridge/
 │   │   ├── cancel.rs           # build_cancel_tx, sign_cancel_tx
 │   │   └── main.rs             # placeholder
 │   └── tests/integration.rs    # 3 tests: request, cancel, cancel-before-timeout rejected
-├── challenger/                 # challenger monitoring client (disprove)
+├── challenger/                 # challenger monitoring client (disprove + kickoff parsing)
 │   ├── Cargo.toml
 │   ├── src/
 │   │   ├── lib.rs              # ChallengerClient<E>: challenge_kickoff, scan_block_for_kickoffs
+│   │   ├── kickoff.rs          # KickoffData + extract_proof_from_kickoff (witness parsing)
 │   │   ├── disprove.rs         # build_disprove_tx, witness_disprove_tx
 │   │   └── main.rs             # placeholder
 │   └── tests/integration.rs    # 3 tests: detect fraud, ignore valid, scan blocks

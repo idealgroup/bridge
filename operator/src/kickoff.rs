@@ -10,7 +10,7 @@ use bitcoin::{Address, Network, ScriptBuf, Witness};
 use bridge::actor::Operator;
 use bridge::params::Params;
 use bridge::scripts;
-use bridge::transactions::fanout::FanoutTree;
+use crate::fanout::FanoutTree;
 use bridge::BridgeError;
 
 /// Builds a kickoff transaction for a given deposit slot.
@@ -214,57 +214,6 @@ mod tests {
 
         BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
         BITCOIN_NETWORK.mine_blocks(1).unwrap();
-    }
-
-    #[test]
-    fn test_extract_proof_from_kickoff() {
-        let secp = Secp256k1::new();
-        let mut rng = test_rng();
-        let params = Params::test_defaults();
-
-        use bridge::network::BITCOIN_NETWORK;
-
-        let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
-
-        let mut tree = crate::fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
-        let init_txout = TxOut {
-            value: params.fanout_init_value(),
-            script_pubkey: bitcoin::Address::p2tr(&secp, operator.pubkey, None, bitcoin::Network::Bitcoin)
-                .script_pubkey(),
-        };
-        crate::fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
-
-        for level in &tree.levels {
-            for tx in level {
-                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
-            }
-        }
-        BITCOIN_NETWORK.mine_blocks(1).unwrap();
-
-        let slot = 0;
-        let disprove_hash = [0xaa; 32];
-        let mut tx = build_kickoff_tx(&secp, &operator, slot, &tree, disprove_hash, &params).unwrap();
-
-        let msg = [0xbb; lamport::MSG_LEN];
-        let lamport_sig = operator.lamport_keys[slot].sign(&msg);
-        let lamport_pk = operator.lamport_pubkey(slot).unwrap();
-
-        let prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
-
-        sign_kickoff_tx(
-            &secp, &mut tx, &operator.keypair,
-            &lamport_sig, &lamport_pk, &prevouts, &params,
-        ).unwrap();
-
-        BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
-        BITCOIN_NETWORK.mine_blocks(1).unwrap();
-
-        // Extract proof from the signed kickoff tx
-        let data = bridge::transactions::kickoff::extract_proof_from_kickoff(&tx, &params).unwrap();
-        assert_eq!(data.operator_pubkey, operator.pubkey);
-        assert_eq!(data.proof, msg);
-        assert_eq!(data.lamport_pk.0, lamport_pk.0);
     }
 
     #[test]

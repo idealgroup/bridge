@@ -1,4 +1,5 @@
 pub mod disprove;
+pub mod kickoff;
 
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::{All, Secp256k1};
@@ -7,7 +8,6 @@ use bitcoin::transaction::Transaction;
 use bridge::engine::BitVMEngine;
 use bridge::params::Params;
 use bridge::scripts;
-use bridge::transactions::kickoff;
 use bridge::BridgeError;
 
 pub struct ChallengerClient<E: BitVMEngine> {
@@ -32,7 +32,7 @@ impl<E: BitVMEngine> ChallengerClient<E> {
         &self,
         kickoff_tx: &Transaction,
     ) -> Result<Option<Transaction>, BridgeError> {
-        let data = kickoff::extract_proof_from_kickoff(kickoff_tx, &self.params)?;
+        let data = crate::kickoff::extract_proof_from_kickoff(kickoff_tx, &self.params)?;
 
         let secret = self
             .engine

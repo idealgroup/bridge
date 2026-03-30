@@ -12,7 +12,7 @@ use bridge::actor::Operator;
 use bridge::network::BitcoinNetwork;
 use bridge::params::Params;
 use bridge::scripts;
-use bridge::transactions::fanout::FanoutTree;
+use crate::fanout::FanoutTree;
 use bridge::BridgeError;
 
 pub struct OperatorClient {
