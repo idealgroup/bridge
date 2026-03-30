@@ -66,7 +66,7 @@
 
 
 % --- withdrawTx  (x: 28 .. 33.6) ---
-% Two rows: in[0] and in[1]
+% Two input rows, two output rows
 \node[txname] at (28, 12.5) {withdrawTx};
 
 % in[0] row  (y: 12.4 .. 11.2)
@@ -74,19 +74,21 @@
 \draw[thick, dashed] (30.8, 12.4) -- (30.8, 11.2);   % divider
 \node[align=center, font=\small] at (29.4, 11.8)
   {deposit UTXO};
-\node[align=center] at (32.2, 11.8) {1\,BTC\\[-1pt]{\small Operator}};
+\node[align=center, font=\small] at (32.2, 11.8)
+  {OP\_RETURN\\[-1pt]{\scriptsize (dummy, 0\,sat)}};
 
 % in[1] row  (y: 11.2 .. 10.0)
 \draw[thick, dashed] (28, 11.2) -- (33.6, 11.2);     % top border
 \draw[thick, dashed] (30.8, 11.2) -- (30.8, 10.0);   % divider
 \node[align=center, font=\small] at (29.4, 10.6)
   {connector};
+\node[align=center] at (32.2, 10.6) {1\,BTC\\[-1pt]{\small Operator}};
 
 % depositTx → withdrawTx in[0]
 % Exit depositTx right col to the right, go ≥1cm, turn up, go right ≥1cm into withdrawTx in[0] left col
 \draw[covenant] (15.6, 9.8) -- (17, 9.8) -- (17, 11.8) -- (28, 11.8);
 \node[font=\scriptsize, text=cBlue, above, align=center] at (22.5, 11.8)
-  {covenant (n-of-n presigned, SIGHASH\_NONE)};
+  {covenant (n-of-n presigned, SIGHASH\_SINGLE)};
 
 
 % ══════════════════════════════════════════════════════
@@ -152,9 +154,9 @@
 \node[align=center, font=\small] at (31.4, 4.8)
   {connector\\[-1pt]{\scriptsize hash preimage}};
 
-% kickoffTx connector → disproveTx  (exit right col, enter left col)
-\draw[fraud] (25.6, 4.8) -- (30, 4.8);
-\node[font=\small, text=cRed, above] at (27.8, 4.8) {Fraud proof};
+% kickoffTx connector → disproveTx  (exit right col connector row, step down to disproveTx)
+\draw[fraud] (25.6, 5.2) -- (26.2, 5.2) -- (26.2, 4.8) -- (30, 4.8);
+\node[font=\small, text=cRed, above] at (28, 4.8) {Fraud proof};
 
 
 % ══════════════════════════════════════════════════════
@@ -251,7 +253,7 @@
     \texttt{cancelTx}             & Depositor & script-path \\[1pt]
     \texttt{fanoutTx}             & Operator  & key-spend \\[1pt]
     \texttt{kickoffTx}\,$\times$3 & Operator  & script-path \\[1pt]
-    \texttt{withdrawTx}\,in0      & Committee & \texttt{SH\_NONE} \\[1pt]
+    \texttt{withdrawTx}\,in0      & Committee & \texttt{SH\_SINGLE} \\[1pt]
     \texttt{withdrawTx}\,in1      & Operator  & key-spend \\[1pt]
     \texttt{disproveTx}           & (none)    & hash preimage \\
     \end{tabular}};
@@ -262,8 +264,9 @@
     \textbullet\; All hashes SHA-256 (32-byte)\\[1pt]
     \textbullet\; kickoffTx txid is deterministic\\
     \phantom{\textbullet}\; (Lamport sig is witness-only)\\[1pt]
-    \textbullet\; withdrawTx in[0]: \texttt{SIGHASH\_NONE}\\
-    \phantom{\textbullet}\; $\Rightarrow$ operator sets outputs/fees\\[1pt]
+    \textbullet\; withdrawTx in[0]: \texttt{SIGHASH\_SINGLE}\\
+    \phantom{\textbullet}\; commits to OP\_RETURN out[0];\\
+    \phantom{\textbullet}\; operator sets out[1] (payment/fees)\\[1pt]
     \textbullet\; Timelock via \texttt{nSequence} committed\\
     \phantom{\textbullet}\; in committee's presigned input};
 
