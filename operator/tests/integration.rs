@@ -1,19 +1,13 @@
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::transaction::TxOut;
-use bitcoin::ScriptBuf;
 
-use bridge::actor::{Committee, Depositor, Operator};
+use bridge::actor::Operator;
 use bridge::network::BITCOIN_NETWORK;
 use bridge::params::Params;
-use bridge::scripts;
 use bridge::test_support::{test_rng_seeded, dummy_outpoint};
 
-use committee::CommitteeClient;
-use depositor::DepositorClient;
 use operator::OperatorClient;
 
 /// Operator builds fanout tree, broadcasts, creates kickoff, confirms on-chain.
-/// No depositor or committee state shared.
 #[test]
 fn test_operator_creates_fanout_and_kickoff() {
     let secp = Secp256k1::new();
@@ -38,104 +32,6 @@ fn test_operator_creates_fanout_and_kickoff() {
     for tx in &txs {
         BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
     }
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
-}
-
-/// Full happy path: depositor creates request, committee presigns deposit + withdraw,
-/// operator builds fanout + kickoff, waits timeout, completes withdraw.
-/// Each actor only communicates via transactions and explicit presigned-tx handoff.
-#[test]
-fn test_operator_completes_withdraw() {
-    let secp = Secp256k1::new();
-    let params = Params::test_defaults();
-    let mut rng = test_rng_seeded(99);
-
-    // === Depositor setup (independent actor) ===
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
-    let request_utxo =
-        BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
-
-    // === Committee setup (independent actor) ===
-    let committee = Committee::new(&mut rng, &secp);
-    let committee_client = CommitteeClient::new(committee, params.clone());
-
-    // === Operator client setup (independent actor) ===
-    let mut operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
-    operator.init_utxo =
-        BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
-    let mut client = OperatorClient::new(operator, params.clone());
-
-    // --- Depositor creates request (on-chain) ---
-    let mut dep_client = DepositorClient::new(depositor, params.clone());
-    let request_tx = dep_client
-        .create_request(committee_client.committee.pubkey, request_utxo)
-        .unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
-    let request_txid = request_tx.compute_txid();
-
-    // --- Committee presigns deposit (on-chain) ---
-    let deposit_tx = committee_client
-        .presign_deposit(
-            request_txid,
-            &dep_client.depositor,
-            &request_tx.output[0],
-        )
-        .unwrap();
-    BITCOIN_NETWORK.broadcast_tx(&deposit_tx).unwrap();
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
-    let deposit_txid = deposit_tx.compute_txid();
-
-    // --- Deterministic kickoff txid (lazily builds fanout tree) ---
-    let slot = 0;
-    let disprove_hash = [0xaa; 32];
-    let kickoff_txid = client.kickoff_txid(slot, disprove_hash).unwrap();
-
-    // --- Construct withdraw prevouts ---
-    // deposit prevout: observable on-chain
-    // connector prevout: deterministic from operator pubkey + disprove_hash
-    let connector_info =
-        scripts::connector_spend_info(&secp, client.operator.pubkey, disprove_hash).unwrap();
-    let connector_output = TxOut {
-        value: params.dust_amount,
-        script_pubkey: ScriptBuf::new_p2tr_tweaked(connector_info.output_key()),
-    };
-    let withdraw_prevouts = vec![deposit_tx.output[0].clone(), connector_output];
-
-    // --- Committee presigns withdraw (message passing: knows operator pubkey + kickoff_txid) ---
-    let presigned_withdraw = committee_client
-        .presign_withdraw(
-            deposit_txid,
-            kickoff_txid,
-            client.operator.pubkey,
-            &withdraw_prevouts,
-        )
-        .unwrap();
-
-    // --- Operator receives presigned withdraw (explicit message passing) ---
-    client
-        .receive_presigned_withdraw(presigned_withdraw)
-        .unwrap();
-
-    // --- Operator creates and broadcasts kickoff (with fanout path) ---
-    let proof_msg = [0xbb; lamport::MSG_LEN];
-    let txs = client
-        .create_kickoff(slot, disprove_hash, &proof_msg)
-        .unwrap();
-    let kickoff_tx = txs.last().unwrap();
-    assert_eq!(kickoff_tx.compute_txid(), kickoff_txid);
-    for tx in &txs {
-        BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
-    }
-    BITCOIN_NETWORK.mine_blocks(1).unwrap();
-
-    // --- Wait for timeout ---
-    BITCOIN_NETWORK.mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64).unwrap();
-
-    // --- Operator completes withdraw (signs input 1 + broadcasts) ---
-    let _withdraw_tx = client
-        .complete_withdraw(kickoff_txid, disprove_hash, &withdraw_prevouts, &BITCOIN_NETWORK)
-        .unwrap();
     BITCOIN_NETWORK.mine_blocks(1).unwrap();
 }
 

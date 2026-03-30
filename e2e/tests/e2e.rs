@@ -1,7 +1,7 @@
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::transaction::TxOut;
-use bitcoin::{Address, Network, ScriptBuf};
+use bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid};
 
 use bridge::actor::{Committee, Depositor, Operator};
 use bridge::engine::MockEngine;
@@ -308,4 +308,109 @@ fn test_fraud_proof_disprove() {
         withdraw_result.is_err(),
         "withdraw should fail because connector was burned by disprove"
     );
+}
+
+/// Challenger ignores a valid proof (no disprove tx produced).
+#[test]
+fn test_challenger_ignores_valid_proof() {
+    let secp = Secp256k1::new();
+    let params = Params::test_defaults();
+    let mut rng = test_rng_seeded(0xe2e);
+    let network = fresh_network();
+
+    let mut operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
+    let operator_init_utxo =
+        network.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
+    operator.init_utxo = operator_init_utxo;
+
+    let mut op_client = OperatorClient::new(operator, params.clone());
+
+    // Valid proof: proof[0] = 0x00 → MockEngine returns None
+    let slot = 0;
+    let proof_msg = [0u8; lamport::MSG_LEN];
+    let disprove_hash = [0xaa; 32];
+
+    let txs = op_client
+        .create_kickoff(slot, disprove_hash, &proof_msg)
+        .unwrap();
+    for tx in &txs {
+        network.broadcast_tx(tx).unwrap();
+    }
+    network.mine_blocks(1).unwrap();
+
+    // Challenger scans tip block
+    let tip = network.get_chain_tip().unwrap();
+    let block = network.get_block_at_height(tip).unwrap();
+
+    let challenger = ChallengerClient::new(MockEngine, params);
+    let candidates = challenger.scan_block_for_kickoffs(&block);
+    assert_eq!(candidates.len(), 1);
+
+    let result = challenger.challenge_kickoff(&candidates[0]).unwrap();
+    assert!(result.is_none(), "challenger should ignore valid proof");
+}
+
+/// Verify extract_proof_from_kickoff roundtrip: build+sign a kickoff,
+/// then extract proof data from the signed witness.
+#[test]
+fn test_extract_proof_from_kickoff() {
+    let secp = Secp256k1::new();
+    let params = Params::test_defaults();
+    let mut rng = test_rng_seeded(0xe2e);
+    let network = fresh_network();
+
+    let mut operator = Operator::new(
+        &mut rng,
+        &secp,
+        OutPoint::new(Txid::all_zeros(), 0),
+        params.deposit_count,
+    );
+    operator.init_utxo =
+        network.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
+
+    let mut tree = operator::fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
+    let init_txout = TxOut {
+        value: params.fanout_init_value(),
+        script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin)
+            .script_pubkey(),
+    };
+    operator::fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params)
+        .unwrap();
+
+    for level in &tree.levels {
+        for tx in level {
+            network.broadcast_tx(tx).unwrap();
+        }
+    }
+    network.mine_blocks(1).unwrap();
+
+    let slot = 0;
+    let disprove_hash = [0xaa; 32];
+    let mut tx =
+        operator::kickoff::build_kickoff_tx(&secp, &operator, slot, &tree, disprove_hash, &params)
+            .unwrap();
+
+    let msg = [0xbb; lamport::MSG_LEN];
+    let lamport_sig = operator.lamport_keys[slot].sign(&msg);
+    let lamport_pk = operator.lamport_pubkey(slot).unwrap();
+    let prevouts = tree.kickoff_prevouts(&params, slot).unwrap();
+
+    operator::kickoff::sign_kickoff_tx(
+        &secp,
+        &mut tx,
+        &operator.keypair,
+        &lamport_sig,
+        &lamport_pk,
+        &prevouts,
+        &params,
+    )
+    .unwrap();
+
+    network.broadcast_tx(&tx).unwrap();
+    network.mine_blocks(1).unwrap();
+
+    let data = challenger::kickoff::extract_proof_from_kickoff(&tx, &params).unwrap();
+    assert_eq!(data.operator_pubkey, operator.pubkey);
+    assert_eq!(data.proof, msg);
+    assert_eq!(data.lamport_pk.0, lamport_pk.0);
 }
