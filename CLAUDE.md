@@ -56,10 +56,10 @@ Each `kickoffTx` consumes one triple of fanout leaf UTXOs (3 inputs), forcing th
 | `requestTx` | — | Depositor signs at deposit time | `SIGHASH_ALL` |
 | `cancelTx` | — | Depositor signs if cancelling | `SIGHASH_ALL` |
 | `depositTx` | Committee | Per deposit | `SIGHASH_ALL` |
-| `withdrawTx` (input 0) | Committee | Per deposit, n variants | `SIGHASH_NONE` |
+| `withdrawTx` (input 0) | Committee | Per deposit, n variants | `SIGHASH_SINGLE` |
 | `withdrawTx` (input 1) | — | Operator signs at claim time | `SIGHASH_ALL` |
 
-All `SIGHASH_ALL` except `withdrawTx` input 0 which uses `SIGHASH_NONE` — this lets the operator choose outputs (and fees) at broadcast time while still committing to all inputs (outpoints, amounts, scriptPubKeys, sequences per BIP 341). The `kickoffTx` txid is deterministic because the Lamport signature is witness data (doesn't affect txid).
+All `SIGHASH_ALL` except `withdrawTx` input 0 which uses `SIGHASH_SINGLE` — this commits to the OP_RETURN at output 0 while letting the operator choose additional outputs (and fees) at broadcast time. All inputs (outpoints, amounts, scriptPubKeys, sequences) are still committed per BIP 341, preserving the connector timelock. The `kickoffTx` txid is deterministic because the Lamport signature is witness data (doesn't affect txid).
 
 ## Architecture Decisions
 
@@ -73,7 +73,7 @@ All `SIGHASH_ALL` except `withdrawTx` input 0 which uses `SIGHASH_NONE` — this
 | Ethereum interaction | Typed events | No Ethereum deps; clean integration boundary |
 | Committee signing | Direct signing functions | `committee/deposit.rs` and `committee/withdraw.rs`; MuSig2 aggregation deferred to CLI/server layer |
 | Script execution | `BitcoinNetwork` enum | All verification through live bitcoind (`Regtest` mode). Chain monitoring via `broadcast_tx`, `get_raw_transaction`, `get_block_at_height`, `get_chain_tip`, `poll_new_blocks`. |
-| Anchor outputs | Operator-keyed P2TR anchor on `kickoffTx` only | `kickoffTx` anchor is operator-keyed (prevents replacement cycling). `depositTx` has no anchor (fee set at presign time). `withdrawTx` uses `SIGHASH_NONE` on input 0 (operator sets fee via outputs) |
+| Anchor outputs | Operator-keyed P2TR anchor on `kickoffTx` only | `kickoffTx` anchor is operator-keyed (prevents replacement cycling). `depositTx` has no anchor (fee set at presign time). `withdrawTx` uses `SIGHASH_SINGLE` on input 0 with OP_RETURN at output 0 (operator sets fee via additional outputs) |
 | Dust outputs | `DUST_AMOUNT` = 546 sats | For non-value-bearing outputs (fanout, connector, disprove) |
 | Timelocks | Relative (`OP_CSV` + `nSequence`) | `cancelTx` uses `OP_CSV` in script; `withdrawTx` connector timelock enforced by `nSequence` committed in committee's presigned input0 |
 | Operator coordination | Out of scope | Economic incentive only; no explicit mechanism |
@@ -114,7 +114,7 @@ ideal-bridge/
 │   │   ├── kickoff.rs          # build_kickoff_tx, sign_kickoff_tx
 │   │   ├── withdraw.rs         # sign_withdraw_input1
 │   │   └── main.rs             # placeholder
-│   └── tests/integration.rs    # 3 tests: fanout+kickoff, full withdraw, wrong lamport rejected
+│   └── tests/integration.rs    # 2 tests: fanout+kickoff, wrong lamport rejected
 ├── depositor/                  # depositor client (request, cancel)
 │   ├── Cargo.toml
 │   ├── src/
@@ -130,10 +130,9 @@ ideal-bridge/
 │   │   ├── kickoff.rs          # KickoffData + extract_proof_from_kickoff (witness parsing)
 │   │   ├── disprove.rs         # build_disprove_tx, witness_disprove_tx
 │   │   └── main.rs             # placeholder
-│   └── tests/integration.rs    # 3 tests: detect fraud, ignore valid, scan blocks
 ├── e2e/                        # end-to-end integration tests across all actor clients
 │   ├── Cargo.toml
-│   └── tests/e2e.rs            # 3 tests: happy path withdraw, cancel escape hatch, fraud proof disprove
+│   └── tests/e2e.rs            # 5 tests: happy path withdraw, cancel escape hatch, fraud proof disprove, ignore valid proof, extract proof from kickoff
 ```
 
 ### Transaction Ownership

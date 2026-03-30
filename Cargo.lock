@@ -224,10 +224,8 @@ name = "challenger"
 version = "0.1.0"
 dependencies = [
  "bitcoin",
- "bitcoincore-rpc",
  "bridge",
  "lamport",
- "operator",
  "rand",
 ]
 
@@ -540,8 +538,6 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "bridge",
- "committee",
- "depositor",
  "lamport",
  "rand",
 ]

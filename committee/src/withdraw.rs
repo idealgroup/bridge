@@ -11,9 +11,10 @@ use bridge::BridgeError;
 
 /// Builds a withdraw transaction.
 ///
-/// - Input 0: depositTx.out[0], key-spend presigned by committee (SIGHASH_NONE)
+/// - Input 0: depositTx.out[0], key-spend presigned by committee (SIGHASH_SINGLE)
 /// - Input 1: kickoffTx.out[0] (connector), key-spend by operator (SIGHASH_ALL)
-/// - Output 0: DEPOSIT_SIZE to operator
+/// - Output 0: OP_RETURN dummy (committed by SIGHASH_SINGLE on input 0)
+/// - Output 1: DEPOSIT_SIZE to operator
 pub fn build_withdraw_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     deposit_txid: Txid,
@@ -27,7 +28,7 @@ pub fn build_withdraw_tx(
         version: Version::TWO,
         lock_time: LockTime::ZERO,
         input: vec![
-            // Input 0: deposit output (committee presigns)
+            // Input 0: deposit output (committee presigns with SIGHASH_SINGLE)
             TxIn {
                 previous_output: bitcoin::OutPoint::new(deposit_txid, 0),
                 script_sig: ScriptBuf::new(),
@@ -43,6 +44,12 @@ pub fn build_withdraw_tx(
             },
         ],
         output: vec![
+            // Output 0: OP_RETURN dummy committed by SIGHASH_SINGLE on input 0
+            TxOut {
+                value: bitcoin::Amount::ZERO,
+                script_pubkey: ScriptBuf::new_op_return(&[]),
+            },
+            // Output 1: operator payment (operator chooses fee via this output)
             TxOut {
                 value: params.deposit_size,
                 script_pubkey: operator_address.script_pubkey(),
@@ -61,13 +68,13 @@ pub fn presign_withdraw_input0(
     let tweaked = committee_keypair.tap_tweak(secp, None);
     let mut cache = SighashCache::new(&*tx);
     let sighash = cache
-        .taproot_key_spend_signature_hash(0, &Prevouts::All(prevouts), TapSighashType::None)
+        .taproot_key_spend_signature_hash(0, &Prevouts::All(prevouts), TapSighashType::Single)
         .map_err(BridgeError::Sighash)?;
     let msg = Message::from_digest(*sighash.as_byte_array());
     let sig = secp.sign_schnorr_no_aux_rand(&msg, &tweaked.to_keypair());
     tx.input[0].witness = Witness::p2tr_key_spend(&bitcoin::taproot::Signature {
         signature: sig,
-        sighash_type: TapSighashType::None,
+        sighash_type: TapSighashType::Single,
     });
     Ok(())
 }
@@ -100,7 +107,9 @@ mod tests {
 
         assert_eq!(tx.input.len(), 2);
         assert_eq!(tx.input[1].sequence, params.kickoff_timeout);
-        assert_eq!(tx.output.len(), 1);
-        assert_eq!(tx.output[0].value, params.deposit_size);
+        assert_eq!(tx.output.len(), 2);
+        assert_eq!(tx.output[0].value, bitcoin::Amount::ZERO);
+        assert!(tx.output[0].script_pubkey.is_op_return());
+        assert_eq!(tx.output[1].value, params.deposit_size);
     }
 }

@@ -1,7 +1,10 @@
+use bitcoin::absolute::LockTime;
 use bitcoin::hashes::{sha256, Hash};
-use bitcoin::secp256k1::Secp256k1;
-use bitcoin::transaction::TxOut;
-use bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid};
+use bitcoin::key::{Keypair, TapTweak};
+use bitcoin::secp256k1::{Message, Secp256k1};
+use bitcoin::sighash::{Prevouts, SighashCache};
+use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
+use bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid, Witness};
 
 use bridge::actor::{Committee, Depositor, Operator};
 use bridge::engine::MockEngine;
@@ -122,13 +125,160 @@ fn test_happy_path_deposit_and_withdraw() {
     network.mine_blocks(1).unwrap();
 
     // === 11. Assert withdraw output pays operator deposit_size ===
-    assert_eq!(withdraw_tx.output[0].value, params.deposit_size);
+    assert_eq!(withdraw_tx.output[1].value, params.deposit_size);
     let operator_address =
         Address::p2tr(&secp, op_client.operator.pubkey, None, Network::Bitcoin);
     assert_eq!(
-        withdraw_tx.output[0].script_pubkey,
+        withdraw_tx.output[1].script_pubkey,
         operator_address.script_pubkey()
     );
+}
+
+/// Operator modifies withdrawTx output after committee presigning (SIGHASH_SINGLE
+/// on input 0 only commits to the OP_RETURN at output 0, not the operator payment).
+#[test]
+fn test_withdraw_operator_can_modify_payment_output() {
+    let secp = Secp256k1::new();
+    let params = Params::test_defaults();
+    let mut rng = test_rng_seeded(0xe2e);
+    let network = fresh_network();
+
+    // === Create actors ===
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+    let committee = Committee::new(&mut rng, &secp);
+    let operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
+
+    // === Fund actors ===
+    let request_utxo =
+        network.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
+    let operator_init_utxo =
+        network.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
+
+    // === Wrap in client APIs ===
+    let mut dep_client = DepositorClient::new(depositor, params.clone());
+    let committee_client = CommitteeClient::new(committee, params.clone());
+    let mut op_operator = operator;
+    op_operator.init_utxo = operator_init_utxo;
+    let mut op_client = OperatorClient::new(op_operator, params.clone());
+
+    // === 1. Depositor creates request ===
+    let request_tx = dep_client
+        .create_request(committee_client.committee.pubkey, request_utxo)
+        .unwrap();
+    network.broadcast_tx(&request_tx).unwrap();
+    network.mine_blocks(1).unwrap();
+    let request_txid = request_tx.compute_txid();
+
+    // === 2. Committee presigns deposit ===
+    let deposit_tx = committee_client
+        .presign_deposit(
+            request_txid,
+            &dep_client.depositor,
+            &request_tx.output[0],
+        )
+        .unwrap();
+    network.broadcast_tx(&deposit_tx).unwrap();
+    network.mine_blocks(1).unwrap();
+    let deposit_txid = deposit_tx.compute_txid();
+
+    // === 3. Compute kickoff txid ===
+    let slot = 0;
+    let disprove_hash = [0xaa; 32];
+    let kickoff_txid = op_client.kickoff_txid(slot, disprove_hash).unwrap();
+
+    // === 4. Build withdraw prevouts ===
+    let connector_info =
+        scripts::connector_spend_info(&secp, op_client.operator.pubkey, disprove_hash).unwrap();
+    let connector_output = TxOut {
+        value: params.dust_amount,
+        script_pubkey: ScriptBuf::new_p2tr_tweaked(connector_info.output_key()),
+    };
+    let withdraw_prevouts = vec![deposit_tx.output[0].clone(), connector_output];
+
+    // === 5. Committee presigns withdraw (SIGHASH_SINGLE on input 0) ===
+    let presigned_withdraw = committee_client
+        .presign_withdraw(
+            deposit_txid,
+            kickoff_txid,
+            op_client.operator.pubkey,
+            &withdraw_prevouts,
+        )
+        .unwrap();
+
+    // === 6. Operator modifies output[1] — different address and deducts fee ===
+    let mut withdraw_tx = presigned_withdraw;
+    let fee = bitcoin::Amount::from_sat(10_000);
+    let alt_sk = bitcoin::secp256k1::SecretKey::new(&mut rng);
+    let alt_pk = alt_sk.x_only_public_key(&secp).0;
+    let alt_address = Address::p2tr(&secp, alt_pk, None, Network::Bitcoin);
+    withdraw_tx.output[1].value = params.deposit_size - fee;
+    withdraw_tx.output[1].script_pubkey = alt_address.script_pubkey();
+
+    // Store modified tx and proceed
+    op_client.receive_presigned_withdraw(withdraw_tx).unwrap();
+
+    // === 7. Operator creates and broadcasts kickoff ===
+    let proof_msg = [0xbb; lamport::MSG_LEN];
+    let txs = op_client
+        .create_kickoff(slot, disprove_hash, &proof_msg)
+        .unwrap();
+    for tx in &txs {
+        network.broadcast_tx(tx).unwrap();
+    }
+    network.mine_blocks(1).unwrap();
+
+    // === 8. Mine kickoff_timeout blocks ===
+    network
+        .mine_blocks(params.kickoff_timeout.to_consensus_u32() as u64)
+        .unwrap();
+
+    // === 9. Operator completes withdraw with modified output ===
+    let withdraw_tx = op_client
+        .complete_withdraw(kickoff_txid, disprove_hash, &withdraw_prevouts, &network)
+        .unwrap();
+    network.mine_blocks(1).unwrap();
+
+    // === 10. Assert output[1] has modified value and different address ===
+    assert_eq!(withdraw_tx.output[1].value, params.deposit_size - fee);
+    assert_eq!(withdraw_tx.output[1].script_pubkey, alt_address.script_pubkey());
+
+    // === 11. Alt key spends the withdraw output ===
+    let withdraw_txid = withdraw_tx.compute_txid();
+    let alt_keypair = Keypair::from_secret_key(&secp, &alt_sk);
+    let tweaked = alt_keypair.tap_tweak(&secp, None);
+
+    let spend_value = withdraw_tx.output[1].value - bitcoin::Amount::from_sat(1_000);
+    let mut spend_tx = Transaction {
+        version: Version::TWO,
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::new(withdraw_txid, 1),
+            script_sig: ScriptBuf::new(),
+            sequence: bitcoin::Sequence::ENABLE_RBF_NO_LOCKTIME,
+            witness: Witness::new(),
+        }],
+        output: vec![TxOut {
+            value: spend_value,
+            script_pubkey: alt_address.script_pubkey(),
+        }],
+    };
+
+    let prevouts = [withdraw_tx.output[1].clone()];
+    let mut cache = SighashCache::new(&spend_tx);
+    let sighash = cache
+        .taproot_key_spend_signature_hash(
+            0,
+            &Prevouts::All(&prevouts),
+            bitcoin::sighash::TapSighashType::Default,
+        )
+        .unwrap();
+    let msg = Message::from_digest(*sighash.as_byte_array());
+    let sig = secp.sign_schnorr_no_aux_rand(&msg, &tweaked.to_keypair());
+    spend_tx.input[0].witness =
+        Witness::p2tr_key_spend(&bitcoin::taproot::Signature { signature: sig, sighash_type: bitcoin::sighash::TapSighashType::Default });
+
+    network.broadcast_tx(&spend_tx).unwrap();
+    network.mine_blocks(1).unwrap();
 }
 
 /// Depositor cancels when committee doesn't act (escape hatch).
