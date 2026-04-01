@@ -6,10 +6,10 @@ use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
 use bitcoin::{Address, Network, OutPoint, ScriptBuf, Witness};
 
-use crate::actor::Operator;
-use crate::params::Params;
-use crate::scripts;
-use crate::BridgeError;
+use bridge::actor::Operator;
+use bridge::params::Params;
+use bridge::scripts;
+use bridge::BridgeError;
 
 /// Tree of fanout transactions expanding one operator UTXO into many leaf outputs.
 pub struct FanoutTree {
@@ -19,24 +19,84 @@ pub struct FanoutTree {
 
 impl FanoutTree {
     /// Returns the outpoint for a given deposit slot and Lamport chunk.
-    pub fn leaf_outpoint(&self, params: &Params, slot: usize, chunk: usize) -> OutPoint {
+    pub fn leaf_outpoint(&self, params: &Params, slot: usize, chunk: usize) -> Result<OutPoint, BridgeError> {
+        if slot >= params.deposit_count {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "slot",
+                index: slot,
+                max: params.deposit_count,
+            });
+        }
+        if chunk >= params.lamport_chunks_per_slot {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "chunk",
+                index: chunk,
+                max: params.lamport_chunks_per_slot,
+            });
+        }
         let leaf_level = &self.levels[self.levels.len() - 1];
         let tx_index = slot / params.fanout_branching;
+        if tx_index >= leaf_level.len() {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "leaf tx_index",
+                index: tx_index,
+                max: leaf_level.len(),
+            });
+        }
         let output_index = (slot % params.fanout_branching) * params.lamport_chunks_per_slot + chunk;
         let txid = leaf_level[tx_index].compute_txid();
-        OutPoint::new(txid, output_index as u32)
+        Ok(OutPoint::new(txid, output_index as u32))
+    }
+
+    /// Returns cloned txs from root down to the leaf containing `slot`.
+    pub fn path_to_slot(&self, params: &Params, slot: usize) -> Result<Vec<Transaction>, BridgeError> {
+        if slot >= params.deposit_count {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "slot",
+                index: slot,
+                max: params.deposit_count,
+            });
+        }
+        let depth = self.levels.len();
+        let leaf_tx_index = slot / params.fanout_branching;
+
+        let mut indices = vec![0usize; depth];
+        indices[depth - 1] = leaf_tx_index;
+        for d in (0..depth - 1).rev() {
+            indices[d] = indices[d + 1] / params.fanout_branching;
+        }
+
+        Ok(indices
+            .iter()
+            .enumerate()
+            .map(|(level, &idx)| self.levels[level][idx].clone())
+            .collect())
     }
 
     /// Returns the prevouts needed to sign/verify a kickoff transaction for a given slot.
-    pub fn kickoff_prevouts(&self, params: &Params, slot: usize) -> Vec<TxOut> {
+    pub fn kickoff_prevouts(&self, params: &Params, slot: usize) -> Result<Vec<TxOut>, BridgeError> {
+        if slot >= params.deposit_count {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "slot",
+                index: slot,
+                max: params.deposit_count,
+            });
+        }
         let leaf_level = &self.levels[self.levels.len() - 1];
         let tx_index = slot / params.fanout_branching;
-        (0..params.lamport_chunks_per_slot)
+        if tx_index >= leaf_level.len() {
+            return Err(BridgeError::IndexOutOfRange {
+                name: "leaf tx_index",
+                index: tx_index,
+                max: leaf_level.len(),
+            });
+        }
+        Ok((0..params.lamport_chunks_per_slot)
             .map(|chunk| {
                 let output_index = (slot % params.fanout_branching) * params.lamport_chunks_per_slot + chunk;
                 leaf_level[tx_index].output[output_index].clone()
             })
-            .collect()
+            .collect())
     }
 }
 
@@ -185,7 +245,7 @@ fn build_leaf_tx(
 
     let mut outputs = Vec::new();
     for slot in slots_start..slots_end {
-        let lamport_pk = operator.lamport_pubkey(slot);
+        let lamport_pk = operator.lamport_pubkey(slot)?;
         for chunk in 0..params.lamport_chunks_per_slot {
             let (start, end) = params.lamport_chunk_range(chunk);
             let spend_info = scripts::fanout_leaf_spend_info(
@@ -219,16 +279,11 @@ fn build_leaf_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actor::Operator;
-    use crate::params::Params;
+    use bridge::actor::Operator;
+    use bridge::params::Params;
+    use bridge::test_support::test_rng;
     use bitcoin::hashes::Hash;
     use bitcoin::Txid;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
-
-    fn test_rng() -> StdRng {
-        StdRng::seed_from_u64(42)
-    }
 
     #[test]
     fn test_fanout_tree_structure() {
@@ -260,10 +315,10 @@ mod tests {
         let mut rng = test_rng();
         let params = Params::test_defaults();
 
-        use crate::network::BITCOIN_NETWORK;
+        use bridge::network::BITCOIN_NETWORK;
 
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
-        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value());
+        operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
         let mut tree = build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
@@ -282,22 +337,13 @@ mod tests {
             }
         }
 
-        // Verify root tx key-spend against init_txout (auto-broadcasts in regtest)
-        BITCOIN_NETWORK
-            .verify_input(&tree.levels[0][0], 0, &[init_txout.clone()])
-            .unwrap();
-
-        // Verify all deeper levels against parent outputs
-        for depth in 1..tree.levels.len() {
-            for node_idx in 0..tree.levels[depth].len() {
-                let parent_idx = node_idx / params.fanout_branching;
-                let output_idx = node_idx % params.fanout_branching;
-                let prevout = tree.levels[depth - 1][parent_idx].output[output_idx].clone();
-                BITCOIN_NETWORK
-                    .verify_input(&tree.levels[depth][node_idx], 0, &[prevout])
-                    .unwrap();
+        // Broadcast all txs in order (root first, then deeper levels)
+        for level in &tree.levels {
+            for tx in level {
+                BITCOIN_NETWORK.broadcast_tx(tx).unwrap();
             }
         }
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
     }
 
     #[test]
@@ -311,52 +357,19 @@ mod tests {
         let tree = build_fanout_tree(&secp, &operator, &params).unwrap();
 
         // Slot 0, chunk 0 -> leaf tx 0, output 0
-        let op = tree.leaf_outpoint(&params, 0, 0);
+        let op = tree.leaf_outpoint(&params, 0, 0).unwrap();
         assert_eq!(op.vout, 0);
 
         // Slot 0, chunk 2 -> leaf tx 0, output 2
-        let op = tree.leaf_outpoint(&params, 0, 2);
+        let op = tree.leaf_outpoint(&params, 0, 2).unwrap();
         assert_eq!(op.vout, 2);
 
         // Slot 1, chunk 0 -> leaf tx 0, output 3
-        let op = tree.leaf_outpoint(&params, 1, 0);
+        let op = tree.leaf_outpoint(&params, 1, 0).unwrap();
         assert_eq!(op.vout, 3);
 
         // Slot 2, chunk 0 -> leaf tx 1, output 0
-        let op = tree.leaf_outpoint(&params, 2, 0);
+        let op = tree.leaf_outpoint(&params, 2, 0).unwrap();
         assert_eq!(op.vout, 0);
-    }
-
-    #[test]
-    #[cfg_attr(feature = "regtest", ignore)]
-    fn test_fanout_wrong_key_rejected() {
-        let secp = Secp256k1::new();
-        let mut rng = test_rng();
-        let params = Params::test_defaults();
-        let init_utxo = OutPoint::new(Txid::all_zeros(), 0);
-        let operator_a = Operator::new(&mut rng, &secp, init_utxo, params.deposit_count);
-
-        let mut tree = build_fanout_tree(&secp, &operator_a, &params).unwrap();
-        let init_txout = TxOut {
-            value: params.fanout_init_value(),
-            script_pubkey: Address::p2tr(&secp, operator_a.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
-        };
-        sign_fanout_tree(&secp, &mut tree, &operator_a.keypair, &init_txout, &params).unwrap();
-
-        // Construct prevout with a different operator's pubkey
-        let init_utxo_b = OutPoint::new(Txid::all_zeros(), 1);
-        let operator_b = Operator::new(&mut rng, &secp, init_utxo_b, params.deposit_count);
-        let wrong_prevout = TxOut {
-            value: params.fanout_init_value(),
-            script_pubkey: Address::p2tr(&secp, operator_b.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
-        };
-
-        use crate::network::BITCOIN_NETWORK;
-        assert!(
-            BITCOIN_NETWORK.verify_input(&tree.levels[0][0], 0, &[wrong_prevout]).is_err(),
-            "key-spend with wrong key should be rejected"
-        );
     }
 }

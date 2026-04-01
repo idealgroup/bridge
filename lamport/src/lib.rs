@@ -1,8 +1,10 @@
+use std::fmt;
+
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::opcodes::all::*;
 use bitcoin::opcodes::OP_TRUE;
 use bitcoin::script::{Builder, ScriptBuf};
-use rand::Rng;
+use rand::{CryptoRng, Rng};
 
 pub const MSG_LEN: usize = 256;
 pub const NUM_BITS: usize = MSG_LEN * 8;
@@ -24,6 +26,27 @@ pub struct PublicKey(pub [[[u8; HASH_LEN]; 2]; NUM_BITS]);
 /// One revealed preimage per bit, selected by the message bit.
 pub struct Signature(pub [[u8; PREIMAGE_LEN]; NUM_BITS]);
 
+#[derive(Debug)]
+pub enum LamportError {
+    InvalidRange { start: usize, end: usize, max: usize },
+    PreimageMismatch { bit_index: usize },
+}
+
+impl fmt::Display for LamportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRange { start, end, max } => {
+                write!(f, "invalid range {start}..{end} (max {max})")
+            }
+            Self::PreimageMismatch { bit_index } => {
+                write!(f, "preimage mismatch at bit {bit_index}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LamportError {}
+
 fn sha256(data: &[u8]) -> [u8; HASH_LEN] {
     sha256::Hash::hash(data).to_byte_array()
 }
@@ -35,7 +58,7 @@ fn get_bit(msg: &[u8; MSG_LEN], bit_index: usize) -> usize {
 }
 
 impl SecretKey {
-    pub fn random(rng: &mut impl Rng) -> Box<SecretKey> {
+    pub fn random(rng: &mut (impl CryptoRng + Rng)) -> Box<SecretKey> {
         let mut sk = Box::new(SecretKey([[[0u8; PREIMAGE_LEN]; 2]; NUM_BITS]));
         for pair in sk.0.iter_mut() {
             rng.fill(&mut pair[0]);
@@ -75,6 +98,27 @@ impl PublicKey {
         true
     }
 
+    /// Recover the signed message from revealed preimages.
+    /// For each bit: sha256(preimage) must match pk[i][0] (bit=0) or pk[i][1] (bit=1).
+    pub fn recover_message(
+        &self,
+        preimages: &[[u8; PREIMAGE_LEN]; NUM_BITS],
+    ) -> Result<[u8; MSG_LEN], LamportError> {
+        let mut msg = [0u8; MSG_LEN];
+        for i in 0..NUM_BITS {
+            let hash = sha256(&preimages[i]);
+            if hash == self.0[i][0] {
+                // bit = 0, nothing to set
+            } else if hash == self.0[i][1] {
+                // bit = 1
+                msg[i / 8] |= 1 << (7 - (i % 8));
+            } else {
+                return Err(LamportError::PreimageMismatch { bit_index: i });
+            }
+        }
+        Ok(msg)
+    }
+
     /// Bitcoin Script that verifies a Lamport signature for bits `start..end`.
     ///
     /// Expects witness stack to contain preimages in reverse order (last bit first)
@@ -93,8 +137,14 @@ impl PublicKey {
     ///     OP_EQUALVERIFY
     /// OP_ENDIF
     /// ```
-    pub fn verification_script_for_range(&self, start: usize, end: usize) -> ScriptBuf {
-        assert!(start < end && end <= NUM_BITS);
+    pub fn verification_script_for_range(
+        &self,
+        start: usize,
+        end: usize,
+    ) -> Result<ScriptBuf, LamportError> {
+        if start >= end || end > NUM_BITS {
+            return Err(LamportError::InvalidRange { start, end, max: NUM_BITS });
+        }
         let mut builder = Builder::new();
         for i in start..end {
             builder = builder
@@ -109,7 +159,7 @@ impl PublicKey {
                 .push_opcode(OP_EQUALVERIFY)
                 .push_opcode(OP_ENDIF);
         }
-        builder.push_opcode(OP_TRUE).into_script()
+        Ok(builder.push_opcode(OP_TRUE).into_script())
     }
 
     /// Verification script for all bits. Only usable when the stack limit is
@@ -117,20 +167,28 @@ impl PublicKey {
     /// with chunks of at most `MAX_BITS_PER_CHUNK` bits.
     pub fn verification_script(&self) -> ScriptBuf {
         self.verification_script_for_range(0, NUM_BITS)
+            .expect("0..NUM_BITS is always valid")
     }
 }
 
 impl Signature {
     /// Preimages for bits `start..end` as witness stack elements, reversed so
     /// the start bit is popped first during script execution.
-    pub fn witness_data_for_range(&self, start: usize, end: usize) -> Vec<Vec<u8>> {
-        assert!(start < end && end <= NUM_BITS);
-        self.0[start..end].iter().rev().map(|p| p.to_vec()).collect()
+    pub fn witness_data_for_range(
+        &self,
+        start: usize,
+        end: usize,
+    ) -> Result<Vec<Vec<u8>>, LamportError> {
+        if start >= end || end > NUM_BITS {
+            return Err(LamportError::InvalidRange { start, end, max: NUM_BITS });
+        }
+        Ok(self.0[start..end].iter().rev().map(|p| p.to_vec()).collect())
     }
 
     /// Witness data for all bits.
     pub fn to_witness_data(&self) -> Vec<Vec<u8>> {
         self.witness_data_for_range(0, NUM_BITS)
+            .expect("0..NUM_BITS is always valid")
     }
 }
 
@@ -315,20 +373,48 @@ mod tests {
         let msg = random_message(&mut rng);
         let sig = sk.sign(&msg);
 
-        let num_chunks = (NUM_BITS + MAX_BITS_PER_CHUNK - 1) / MAX_BITS_PER_CHUNK;
+        let num_chunks = NUM_BITS.div_ceil(MAX_BITS_PER_CHUNK);
         assert_eq!(num_chunks, 3); // 2048 / 1000 = 3 chunks
 
         for chunk in 0..num_chunks {
             let start = chunk * MAX_BITS_PER_CHUNK;
             let end = ((chunk + 1) * MAX_BITS_PER_CHUNK).min(NUM_BITS);
 
-            let script = pk.verification_script_for_range(start, end);
-            let witness = sig.witness_data_for_range(start, end);
+            let script = pk.verification_script_for_range(start, end).unwrap();
+            let witness = sig.witness_data_for_range(start, end).unwrap();
 
             assert!(
                 run_script_with_options(script, witness, true),
                 "chunk {chunk} (bits {start}..{end}) failed with stack limit enforced"
             );
+        }
+    }
+
+    #[test]
+    fn test_recover_message_roundtrip() {
+        let mut rng = test_rng();
+        let sk = SecretKey::random(&mut rng);
+        let pk = sk.public_key();
+        let msg = random_message(&mut rng);
+        let sig = sk.sign(&msg);
+        let recovered = pk.recover_message(&sig.0).unwrap();
+        assert_eq!(recovered, msg);
+    }
+
+    #[test]
+    fn test_recover_message_corrupted_preimage() {
+        let mut rng = test_rng();
+        let sk = SecretKey::random(&mut rng);
+        let pk = sk.public_key();
+        let msg = random_message(&mut rng);
+        let sig = sk.sign(&msg);
+        let mut preimages = sig.0;
+        preimages[42] = [0xde; PREIMAGE_LEN];
+        let result = pk.recover_message(&preimages);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            LamportError::PreimageMismatch { bit_index } => assert_eq!(bit_index, 42),
+            other => panic!("unexpected error: {other}"),
         }
     }
 

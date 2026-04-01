@@ -2,7 +2,9 @@ use bitcoin::key::{Keypair, UntweakedPublicKey as XOnlyPublicKey};
 use bitcoin::secp256k1::{Secp256k1, SecretKey};
 use bitcoin::OutPoint;
 use bitcoin::hashes::{sha256, Hash};
-use rand::Rng;
+use rand::{CryptoRng, Rng};
+
+use crate::BridgeError;
 
 pub struct Operator {
     pub keypair: Keypair,
@@ -25,7 +27,7 @@ pub struct Committee {
 }
 
 fn random_keypair(
-    rng: &mut impl Rng,
+    rng: &mut (impl CryptoRng + Rng),
     secp: &Secp256k1<bitcoin::secp256k1::All>,
 ) -> Keypair {
     let mut secret_bytes = [0u8; 32];
@@ -39,7 +41,7 @@ fn random_keypair(
 
 impl Operator {
     pub fn new(
-        rng: &mut impl Rng,
+        rng: &mut (impl CryptoRng + Rng),
         secp: &Secp256k1<bitcoin::secp256k1::All>,
         init_utxo: OutPoint,
         deposit_count: usize,
@@ -57,14 +59,21 @@ impl Operator {
         }
     }
 
-    pub fn lamport_pubkey(&self, slot: usize) -> Box<lamport::PublicKey> {
-        self.lamport_keys[slot].public_key()
+    pub fn lamport_pubkey(&self, slot: usize) -> Result<Box<lamport::PublicKey>, BridgeError> {
+        self.lamport_keys
+            .get(slot)
+            .map(|sk| sk.public_key())
+            .ok_or(BridgeError::IndexOutOfRange {
+                name: "lamport slot",
+                index: slot,
+                max: self.lamport_keys.len(),
+            })
     }
 }
 
 impl Depositor {
     pub fn new(
-        rng: &mut impl Rng,
+        rng: &mut (impl CryptoRng + Rng),
         secp: &Secp256k1<bitcoin::secp256k1::All>,
         index: usize,
         request_utxo: OutPoint,
@@ -89,7 +98,7 @@ impl Depositor {
 
 impl Committee {
     pub fn new(
-        rng: &mut impl Rng,
+        rng: &mut (impl CryptoRng + Rng),
         secp: &Secp256k1<bitcoin::secp256k1::All>,
     ) -> Self {
         let keypair = random_keypair(rng, secp);
@@ -98,21 +107,19 @@ impl Committee {
     }
 }
 
+#[derive(Default)]
+pub struct Challenger;
+
+impl Challenger {
+    pub fn new() -> Self {
+        Challenger
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::hashes::Hash;
-    use bitcoin::Txid;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
-
-    fn test_rng() -> StdRng {
-        StdRng::seed_from_u64(42)
-    }
-
-    fn dummy_outpoint() -> OutPoint {
-        OutPoint::new(Txid::all_zeros(), 0)
-    }
+    use crate::test_support::{test_rng, dummy_outpoint};
 
     #[test]
     fn test_operator_creation() {

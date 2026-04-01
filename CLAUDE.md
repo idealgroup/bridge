@@ -44,6 +44,7 @@ Each `kickoffTx` consumes one triple of fanout leaf UTXOs (3 inputs), forcing th
 - **Committee** (n-of-n): presigns deposit and withdraw transactions. Static signer set. Must be online for new deposits.
 - **Operators** (`1..n`): front withdrawals, post proofs, claim deposits after timeout. Not involved in deposit presigning.
 - **Depositors** (`1..DEPOSIT_COUNT`): lock BTC, receive wBTC on Ethereum.
+- **Challengers** (permissionless): verify proofs, submit disprove transactions if fraud detected.
 
 ### Presigning Model
 
@@ -55,10 +56,10 @@ Each `kickoffTx` consumes one triple of fanout leaf UTXOs (3 inputs), forcing th
 | `requestTx` | — | Depositor signs at deposit time | `SIGHASH_ALL` |
 | `cancelTx` | — | Depositor signs if cancelling | `SIGHASH_ALL` |
 | `depositTx` | Committee | Per deposit | `SIGHASH_ALL` |
-| `withdrawTx` (input 0) | Committee | Per deposit, n variants | `SIGHASH_ALL` |
+| `withdrawTx` (input 0) | Committee | Per deposit, n variants | `SIGHASH_SINGLE` |
 | `withdrawTx` (input 1) | — | Operator signs at claim time | `SIGHASH_ALL` |
 
-All `SIGHASH_ALL` — every tx is fully determined at sign time. The `kickoffTx` txid is deterministic because the Lamport signature is witness data (doesn't affect txid).
+All `SIGHASH_ALL` except `withdrawTx` input 0 which uses `SIGHASH_SINGLE` — this commits to the OP_RETURN at output 0 while letting the operator choose additional outputs (and fees) at broadcast time. All inputs (outpoints, amounts, scriptPubKeys, sequences) are still committed per BIP 341, preserving the connector timelock. The `kickoffTx` txid is deterministic because the Lamport signature is witness data (doesn't affect txid).
 
 ## Architecture Decisions
 
@@ -66,16 +67,17 @@ All `SIGHASH_ALL` — every tx is fully determined at sign time. The `kickoffTx`
 |---|---|---|
 | Script type | Taproot (P2TR) | Key-spend for happy path, script-path leaves for alternatives |
 | Lamport hash | `OP_SHA256` (32-byte) | Collision resistance required (operator could forge unusable GC input with 160-bit hash). ~128KB pubkey + ~40KB sig for 256-byte proof |
-| Lamport chunking | 3 UTXOs per deposit slot | Tapscript stack limit is 1000 items; per-bit verification peaks at N+2 (OP_DUP + pubkey push), so max 998 bits per script. 2048 bits / 998 = 3 chunks. The `lamport` crate exposes `verification_script_for_range` / `witness_data_for_range`; the `bridge` crate wires chunks to fanout outputs and kickoff inputs. |
+| Lamport chunking | 3 UTXOs per deposit slot | Tapscript stack limit is 1000 items; per-bit verification peaks at N+2 (OP_DUP + pubkey push), so max 998 bits per script. 2048 bits / 998 = 3 chunks. The `lamport` crate exposes `verification_script_for_range` / `witness_data_for_range`; `operator/` wires chunks to fanout outputs and kickoff inputs. |
 | Lamport over Winternitz | Lamport | 1:1 mapping to garbled circuit wire labels |
 | BitVM engine | Trait (black box) | GC/SNARK verification out of scope; mock in tests |
 | Ethereum interaction | Typed events | No Ethereum deps; clean integration boundary |
-| Committee signing | Direct signing functions | `presign_deposit_tx()` / `presign_withdraw_input0()`; MuSig2 aggregation deferred to CLI/server layer |
-| Script execution | `BitcoinNetwork` enum | `ScriptExec` mode (bitcoin-scriptexec) for unit tests, `Regtest` mode (live bitcoind) for integration |
-| Anchor outputs | P2A on `kickoffTx` + `withdrawTx` | Presigned txs need CPFP fee bumping |
+| Committee signing | Direct signing functions | `committee/deposit.rs` and `committee/withdraw.rs`; MuSig2 aggregation deferred to CLI/server layer |
+| Script execution | `BitcoinNetwork` enum | All verification through live bitcoind (`Regtest` mode). Chain monitoring via `broadcast_tx`, `get_raw_transaction`, `get_block_at_height`, `get_chain_tip`, `poll_new_blocks`. |
+| Anchor outputs | Operator-keyed P2TR anchor on `kickoffTx` only | `kickoffTx` anchor is operator-keyed (prevents replacement cycling). `depositTx` has no anchor (fee set at presign time). `withdrawTx` uses `SIGHASH_SINGLE` on input 0 with OP_RETURN at output 0 (operator sets fee via additional outputs) |
 | Dust outputs | `DUST_AMOUNT` = 546 sats | For non-value-bearing outputs (fanout, connector, disprove) |
 | Timelocks | Relative (`OP_CSV` + `nSequence`) | `cancelTx` uses `OP_CSV` in script; `withdrawTx` connector timelock enforced by `nSequence` committed in committee's presigned input0 |
 | Operator coordination | Out of scope | Economic incentive only; no explicit mechanism |
+| Actor isolation | Separate crates + clients | Each actor (Operator, Depositor, Committee, Challenger) has its own crate with tx build/sign logic and a Client struct. `bridge/` is a thin shared-types layer. No shared in-memory state between actors — each must own all data for its workflow or learn it from on-chain data. |
 | Error handling | `Result<T, BridgeError>` | Unified error enum in `lib.rs`. No panics outside tests. |
 
 ## Crate Structure
@@ -86,36 +88,74 @@ ideal-bridge/
 ├── lamport/                    # standalone Lamport signature library
 │   ├── Cargo.toml
 │   └── src/lib.rs              # keygen, sign, bitcoin script verification
-├── bridge/                     # main crate
+├── bridge/                     # shared types, scripts, infrastructure (no tx building)
 │   ├── Cargo.toml
 │   └── src/
-│       ├── lib.rs
+│       ├── lib.rs              # BridgeError enum
 │       ├── params.rs           # configurable constants
-│       ├── actor.rs            # Operator, Depositor, Committee key material
-│       ├── engine.rs           # BitVMEngine trait
-│       ├── transactions/       # one module per tx type
-│       │   ├── mod.rs          # + flow_tests (end-to-end integration tests)
-│       │   ├── fanout.rs
-│       │   ├── kickoff.rs
-│       │   ├── disprove.rs
-│       │   ├── request.rs
-│       │   ├── cancel.rs
-│       │   ├── deposit.rs
-│       │   └── withdraw.rs
-│       ├── scripts.rs          # spending condition script builders + P2A helper
-│       ├── network.rs          # BitcoinNetwork: ScriptExec / Regtest dispatch
-│       └── regtest.rs          # bitcoind regtest node management (behind `regtest` feature)
+│       ├── actor.rs            # data-only actor structs (Operator, Depositor, Committee, Challenger) — key material + constructors, no tx methods
+│       ├── engine.rs           # BitVMEngine trait + MockEngine
+│       ├── scripts.rs          # spending condition script builders
+│       ├── test_support.rs     # shared test helpers (test_rng, dummy_outpoint)
+│       ├── network.rs          # BitcoinNetwork: Regtest dispatch + chain monitoring
+│       └── regtest.rs          # bitcoind regtest node management
+├── committee/                  # committee signing client (presigns deposit + withdraw)
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs              # CommitteeClient: presign_deposit, presign_withdraw
+│   │   ├── deposit.rs          # build_deposit_tx, presign_deposit_tx
+│   │   ├── withdraw.rs         # build_withdraw_tx, presign_withdraw_input0
+│   │   └── main.rs             # placeholder
+├── operator/                   # operator client (fanout, kickoff, withdraw completion)
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs              # OperatorClient: create_fanout_tree, create_kickoff, complete_withdraw
+│   │   ├── fanout.rs           # FanoutTree struct + build_fanout_tree, sign_fanout_tree
+│   │   ├── kickoff.rs          # build_kickoff_tx, sign_kickoff_tx
+│   │   ├── withdraw.rs         # sign_withdraw_input1
+│   │   └── main.rs             # placeholder
+│   └── tests/integration.rs    # 2 tests: fanout+kickoff, wrong lamport rejected
+├── depositor/                  # depositor client (request, cancel)
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs              # DepositorClient: create_request, create_cancel
+│   │   ├── request.rs          # build_request_tx, sign_request_tx
+│   │   ├── cancel.rs           # build_cancel_tx, sign_cancel_tx
+│   │   └── main.rs             # placeholder
+│   └── tests/integration.rs    # 3 tests: request, cancel, cancel-before-timeout rejected
+├── challenger/                 # challenger monitoring client (disprove + kickoff parsing)
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs              # ChallengerClient<E>: challenge_kickoff, scan_block_for_kickoffs
+│   │   ├── kickoff.rs          # KickoffData + extract_proof_from_kickoff (witness parsing)
+│   │   ├── disprove.rs         # build_disprove_tx, witness_disprove_tx
+│   │   └── main.rs             # placeholder
+├── e2e/                        # end-to-end integration tests across all actor clients
+│   ├── Cargo.toml
+│   └── tests/e2e.rs            # 5 tests: happy path withdraw, cancel escape hatch, fraud proof disprove, ignore valid proof, extract proof from kickoff
 ```
+
+### Transaction Ownership
+
+Each actor crate owns the build/sign logic for the transactions it creates:
+
+| Transaction | Owner crate | Functions |
+|---|---|---|
+| `requestTx` | `depositor/` | `build_request_tx`, `sign_request_tx` |
+| `cancelTx` | `depositor/` | `build_cancel_tx`, `sign_cancel_tx` |
+| `fanoutTx` | `operator/` | `build_fanout_tree`, `sign_fanout_tree` |
+| `kickoffTx` | `operator/` | `build_kickoff_tx`, `sign_kickoff_tx` |
+| `withdrawTx` (input 1) | `operator/` | `sign_withdraw_input1` |
+| `depositTx` | `committee/` | `build_deposit_tx`, `presign_deposit_tx` |
+| `withdrawTx` (build + input 0) | `committee/` | `build_withdraw_tx`, `presign_withdraw_input0` |
+| `disproveTx` | `challenger/` | `build_disprove_tx`, `witness_disprove_tx` |
 
 ## Build Order
 
 1. `lamport` — keygen, sign, Bitcoin Script verification, unit tests
-2. `params` + `actor` — types and configurable constants
-3. `engine` — BitVMEngine trait + mock
-4. `scripts` — spending condition script builders
-5. `transactions/` — one at a time: fanout -> kickoff -> disprove -> request -> cancel -> deposit -> withdraw
-6. `network` + `regtest` — test infrastructure (ScriptExec + live bitcoind)
-7. Flow tests in `transactions/mod.rs` — end-to-end deposit + withdrawal cycles
+2. `bridge` — shared types: `params`, `actor` (data-only), `engine`, `scripts`, `transactions/fanout` + `transactions/kickoff` (shared types only), `network` + `regtest`
+3. Actor crates (each depends on `bridge`): `committee`, `operator`, `depositor`, `challenger`
+4. `e2e` — end-to-end integration tests across all actor clients
 
 ## Parameters (defaults)
 

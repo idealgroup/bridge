@@ -2,10 +2,9 @@ pub mod actor;
 pub mod engine;
 pub mod network;
 pub mod params;
-#[cfg(feature = "regtest")]
 pub mod regtest;
 pub mod scripts;
-pub mod transactions;
+pub mod test_support;
 
 use std::fmt;
 
@@ -19,10 +18,10 @@ pub enum BridgeError {
     TaprootBuilder(String),
     Sighash(bitcoin::sighash::TaprootError),
     Signing(String),
-    MissingUtxo(&'static str),
-    ScriptExecution(String),
-    #[cfg(feature = "regtest")]
+    MissingData(&'static str),
+    WitnessParse(String),
     Regtest(String),
+    InvalidParams(String),
 }
 
 impl fmt::Display for BridgeError {
@@ -34,10 +33,10 @@ impl fmt::Display for BridgeError {
             Self::TaprootBuilder(msg) => write!(f, "taproot builder: {msg}"),
             Self::Sighash(e) => write!(f, "sighash: {e}"),
             Self::Signing(msg) => write!(f, "signing: {msg}"),
-            Self::MissingUtxo(name) => write!(f, "missing utxo: {name}"),
-            Self::ScriptExecution(msg) => write!(f, "script execution: {msg}"),
-            #[cfg(feature = "regtest")]
+            Self::MissingData(name) => write!(f, "missing data: {name}"),
+            Self::WitnessParse(msg) => write!(f, "witness parse: {msg}"),
             Self::Regtest(msg) => write!(f, "regtest: {msg}"),
+            Self::InvalidParams(msg) => write!(f, "invalid params: {msg}"),
         }
     }
 }

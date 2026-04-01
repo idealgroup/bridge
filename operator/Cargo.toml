@@ -1,11 +1,12 @@
 [package]
-name = "bridge"
+name = "operator"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bitcoin = "0.32"
-bitcoincore-rpc = "0.19"
+bridge = { path = "../bridge" }
 lamport = { path = "../lamport" }
+bitcoin = "0.32"
+
+[dev-dependencies]
 rand = "0.8"
-tempfile = "3"

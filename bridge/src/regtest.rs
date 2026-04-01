@@ -88,22 +88,6 @@ impl RegtestNode {
         })
     }
 
-    /// Connect to an existing bitcoind node.
-    pub fn connect(url: &str, user: &str, pass: &str) -> Result<Self, BridgeError> {
-        let client = Client::new(url, Auth::UserPass(user.into(), pass.into()))
-            .map_err(|e| BridgeError::Regtest(format!("rpc client: {e}")))?;
-
-        client
-            .get_blockchain_info()
-            .map_err(|e| BridgeError::Regtest(format!("connect failed: {e}")))?;
-
-        Ok(Self {
-            client,
-            process: std::sync::Mutex::new(None),
-            datadir: None,
-        })
-    }
-
     /// Broadcast a fully-signed transaction.
     pub fn send_transaction(&self, tx: &Transaction) -> Result<Txid, BridgeError> {
         let hex = encode::serialize_hex(tx);
@@ -134,7 +118,7 @@ impl RegtestNode {
             .test_mempool_accept(&[hex])
             .map_err(|e| BridgeError::Regtest(format!("test_mempool_accept: {e}")))?;
         let result = results.first();
-        let allowed = result.map_or(false, |r| r.allowed);
+        let allowed = result.is_some_and(|r| r.allowed);
         let reason = result.and_then(|r| r.reject_reason.clone());
         Ok((allowed, reason))
     }

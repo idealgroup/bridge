@@ -5,22 +5,7 @@ use bitcoin::taproot::{TaprootBuilder, TaprootSpendInfo};
 use bitcoin::blockdata::transaction::Sequence;
 use bitcoin::secp256k1::Secp256k1;
 
-use bitcoin::Amount;
-
 use crate::BridgeError;
-
-/// P2A (Pay-to-Anchor) dust threshold: 240 sats.
-pub const P2A_DUST: Amount = Amount::from_sat(240);
-
-/// P2A (Pay-to-Anchor) scriptPubKey: `OP_1 <0x4e73>`.
-/// Anyone-can-spend output for CPFP fee bumping on presigned transactions.
-pub fn p2a_script() -> ScriptBuf {
-    use bitcoin::blockdata::script::witness_program::WitnessProgram;
-    use bitcoin::blockdata::script::witness_version::WitnessVersion;
-    let program = WitnessProgram::new(WitnessVersion::V1, &[0x4e, 0x73])
-        .expect("valid 2-byte witness v1 program");
-    ScriptBuf::new_witness_program(&program)
-}
 
 /// BIP-341 unspendable internal key (NUMS point).
 /// H = lift_x(0x0250929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0)
@@ -72,7 +57,9 @@ pub fn fanout_leaf_spend_info(
     chunk_start: usize,
     chunk_end: usize,
 ) -> Result<TaprootSpendInfo, BridgeError> {
-    let lamport_script = lamport_pk.verification_script_for_range(chunk_start, chunk_end);
+    let lamport_script = lamport_pk
+        .verification_script_for_range(chunk_start, chunk_end)
+        .map_err(|e| BridgeError::Signing(format!("lamport: {e}")))?;
 
     let script = Builder::new()
         .push_x_only_key(&operator_pubkey)
@@ -146,13 +133,15 @@ pub fn fanout_leaf_script(
     lamport_pk: &lamport::PublicKey,
     chunk_start: usize,
     chunk_end: usize,
-) -> ScriptBuf {
-    let lamport_script = lamport_pk.verification_script_for_range(chunk_start, chunk_end);
+) -> Result<ScriptBuf, BridgeError> {
+    let lamport_script = lamport_pk
+        .verification_script_for_range(chunk_start, chunk_end)
+        .map_err(|e| BridgeError::Signing(format!("lamport: {e}")))?;
     let prefix = Builder::new()
         .push_x_only_key(&operator_pubkey)
         .push_opcode(OP_CHECKSIGVERIFY)
         .into_script();
-    ScriptBuf::from([prefix.as_bytes(), lamport_script.as_bytes()].concat())
+    Ok(ScriptBuf::from([prefix.as_bytes(), lamport_script.as_bytes()].concat()))
 }
 
 #[cfg(test)]
@@ -160,13 +149,9 @@ mod tests {
     use super::*;
     use bitcoin::key::Keypair;
     use bitcoin::secp256k1::SecretKey;
-    use rand::rngs::StdRng;
-    use rand::SeedableRng;
     use rand::Rng;
 
-    fn test_rng() -> StdRng {
-        StdRng::seed_from_u64(42)
-    }
+    use crate::test_support::test_rng;
 
     fn random_keypair(rng: &mut impl Rng, secp: &Secp256k1<bitcoin::secp256k1::All>) -> Keypair {
         let mut bytes = [0u8; 32];

@@ -1,6 +1,7 @@
 use bitcoin::Amount;
 use bitcoin::blockdata::transaction::Sequence;
 
+#[derive(Clone)]
 pub struct Params {
     pub deposit_size: Amount,
     pub dust_amount: Amount,
@@ -17,7 +18,7 @@ pub struct Params {
 
 impl Default for Params {
     fn default() -> Self {
-        Self {
+        let p = Self {
             deposit_size: Amount::from_int_btc(1),
             dust_amount: Amount::from_sat(546),
             proof_size: 256,
@@ -31,13 +32,15 @@ impl Default for Params {
             kickoff_timeout: Sequence::from_512_second_intervals(507),
             // ~1 hour in 512-second intervals: 3600/512 ≈ 7
             deposit_timeout: Sequence::from_512_second_intervals(7),
-        }
+        };
+        p.validate().expect("default params must be valid");
+        p
     }
 }
 
 impl Params {
     pub fn test_defaults() -> Self {
-        Self {
+        let p = Self {
             deposit_size: Amount::from_sat(100_000),
             dust_amount: Amount::from_sat(546),
             proof_size: 256,
@@ -49,7 +52,56 @@ impl Params {
             lamport_chunks_per_slot: 3,
             kickoff_timeout: Sequence::from_height(10),
             deposit_timeout: Sequence::from_height(5),
+        };
+        p.validate().expect("test params must be valid");
+        p
+    }
+
+    /// Validate that derived parameters are consistent.
+    pub fn validate(&self) -> Result<(), crate::BridgeError> {
+        if self.deposit_count == 0 {
+            return Err(crate::BridgeError::InvalidParams(
+                "deposit_count must be > 0".into(),
+            ));
         }
+        if self.fanout_branching <= 1 {
+            return Err(crate::BridgeError::InvalidParams(
+                "fanout_branching must be > 1".into(),
+            ));
+        }
+        if self.fanout_depth == 0 {
+            return Err(crate::BridgeError::InvalidParams(
+                "fanout_depth must be > 0".into(),
+            ));
+        }
+        if self.proof_size == 0 {
+            return Err(crate::BridgeError::InvalidParams(
+                "proof_size must be > 0".into(),
+            ));
+        }
+        let total_bits = self.proof_size * 8;
+        let expected_chunks =
+            total_bits.div_ceil(lamport::MAX_BITS_PER_CHUNK);
+        if self.lamport_chunks_per_slot != expected_chunks {
+            return Err(crate::BridgeError::InvalidParams(format!(
+                "lamport_chunks_per_slot is {} but proof_size {} requires {}",
+                self.lamport_chunks_per_slot, self.proof_size, expected_chunks,
+            )));
+        }
+        // Each leaf tx handles `branching` slots, and there are branching^(depth-1)
+        // leaf txs, so total capacity = branching^depth.
+        let capacity = self.fanout_branching
+            .checked_pow(self.fanout_depth as u32)
+            .ok_or_else(|| crate::BridgeError::InvalidParams(
+                "fanout_branching^fanout_depth overflows".into(),
+            ))?;
+        if capacity < self.deposit_count {
+            return Err(crate::BridgeError::InvalidParams(format!(
+                "fanout_branching^fanout_depth = {} < deposit_count {}",
+                capacity, self.deposit_count,
+            )));
+        }
+        Ok(())
     }
 
     /// Returns the (start_bit, end_bit) range for a given Lamport chunk index.
@@ -84,6 +136,12 @@ impl Params {
     pub fn fanout_init_value(&self) -> Amount {
         Amount::from_sat(self.fanout_branching as u64 * self.fanout_output_value(0).to_sat())
     }
+
+    /// Value the depositor must fund into their request UTXO.
+    /// Must exceed `deposit_size` so the difference covers the deposit tx fee.
+    pub fn request_input_value(&self) -> Amount {
+        self.deposit_size + self.dust_amount
+    }
 }
 
 #[cfg(test)]
@@ -104,5 +162,25 @@ mod tests {
         assert_eq!(p.deposit_count, 4);
         assert_eq!(p.fanout_branching, 2);
         assert_eq!(p.fanout_depth, 2);
+    }
+
+    #[test]
+    fn test_validate_defaults() {
+        Params::default().validate().unwrap();
+        Params::test_defaults().validate().unwrap();
+    }
+
+    #[test]
+    fn test_validate_wrong_chunks() {
+        let mut p = Params::test_defaults();
+        p.lamport_chunks_per_slot = 5;
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_insufficient_fanout() {
+        let mut p = Params::test_defaults();
+        p.fanout_depth = 1; // branching^0 = 1 < deposit_count=4
+        assert!(p.validate().is_err());
     }
 }

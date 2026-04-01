@@ -6,10 +6,12 @@ use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
 use bitcoin::{ScriptBuf, Witness};
 
-use crate::actor::{Committee, Depositor};
-use crate::params::Params;
-use crate::scripts;
-use crate::BridgeError;
+use bitcoin::key::UntweakedPublicKey as XOnlyPublicKey;
+
+use bridge::actor::Depositor;
+use bridge::params::Params;
+use bridge::scripts;
+use bridge::BridgeError;
 
 /// Builds a request transaction.
 ///
@@ -18,12 +20,12 @@ use crate::BridgeError;
 pub fn build_request_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     depositor: &Depositor,
-    committee: &Committee,
+    committee_pubkey: XOnlyPublicKey,
     params: &Params,
 ) -> Result<Transaction, BridgeError> {
     let spend_info = scripts::request_spend_info(
         secp,
-        committee.pubkey,
+        committee_pubkey,
         depositor.pubkey,
         depositor.deposit_secret_hash(),
         params.deposit_timeout,
@@ -41,7 +43,7 @@ pub fn build_request_tx(
             witness: Witness::new(),
         }],
         output: vec![TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey,
         }],
     })
@@ -71,10 +73,10 @@ pub fn sign_request_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actor::{Committee, Depositor};
-    use crate::params::Params;
-    use bitcoin::hashes::Hash;
+    use bridge::actor::{Committee, Depositor};
+    use bridge::params::Params;
     use bitcoin::{Address, Network, OutPoint, Txid};
+    use bitcoin::hashes::Hash;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -91,10 +93,10 @@ mod tests {
         );
         let committee = Committee::new(&mut rng, &secp);
 
-        let tx = build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let tx = build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         assert_eq!(tx.input.len(), 1);
         assert_eq!(tx.output.len(), 1);
-        assert_eq!(tx.output[0].value, params.deposit_size);
+        assert_eq!(tx.output[0].value, params.request_input_value());
     }
 
     #[test]
@@ -103,14 +105,14 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
 
-        use crate::network::BITCOIN_NETWORK;
+        use bridge::network::BITCOIN_NETWORK;
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
-        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.deposit_size);
+        depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let mut tx = build_request_tx(&secp, &depositor, &committee, &params).unwrap();
+        let mut tx = build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         let prevouts = [TxOut {
-            value: params.deposit_size,
+            value: params.request_input_value(),
             script_pubkey: Address::p2tr(&secp, depositor.pubkey, None, Network::Bitcoin)
                 .script_pubkey(),
         }];
@@ -119,6 +121,7 @@ mod tests {
         assert_eq!(tx.input[0].witness.len(), 1);
         assert_eq!(tx.input[0].witness[0].len(), 64);
 
-        BITCOIN_NETWORK.verify_input(&tx, 0, &prevouts).unwrap();
+        BITCOIN_NETWORK.broadcast_tx(&tx).unwrap();
+        BITCOIN_NETWORK.mine_blocks(1).unwrap();
     }
 }
