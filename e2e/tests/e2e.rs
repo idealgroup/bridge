@@ -64,7 +64,8 @@ fn test_happy_path_deposit_and_withdraw() {
     let deposit_tx = committee_client
         .presign_deposit(
             request_txid,
-            &dep_client.depositor,
+            dep_client.depositor.pubkey,
+            dep_client.depositor.deposit_secret_hash(),
             &request_tx.output[0],
         )
         .unwrap();
@@ -173,7 +174,8 @@ fn test_withdraw_operator_can_modify_payment_output() {
     let deposit_tx = committee_client
         .presign_deposit(
             request_txid,
-            &dep_client.depositor,
+            dep_client.depositor.pubkey,
+            dep_client.depositor.deposit_secret_hash(),
             &request_tx.output[0],
         )
         .unwrap();
@@ -370,7 +372,8 @@ fn test_fraud_proof_disprove() {
     let deposit_tx = committee_client
         .presign_deposit(
             request_txid,
-            &dep_client.depositor,
+            dep_client.depositor.pubkey,
+            dep_client.depositor.deposit_secret_hash(),
             &request_tx.output[0],
         )
         .unwrap();

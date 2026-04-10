@@ -12,8 +12,6 @@ challenger = { path = "../challenger" }
 lamport = { path = "../lamport" }
 bitcoin = "0.32"
 rand = "0.8"
-starknet = "0.17"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json"] }
-url = "2"
+alloy = { version = "1.8", features = ["full", "node-bindings", "sol-types", "contract", "providers", "rpc-client", "signers", "signer-local"] }

@@ -1,21 +1,21 @@
 # ideal-bridge
 
-A Rust + Cairo implementation of a BitVM3 bridge between Bitcoin and Starknet.
+A Rust + Solidity implementation of a BitVM3 bridge between Bitcoin and Ethereum.
 Designed as a clean, testable library that can be integrated into a CLI/server by another team.
 
 ## Protocol Overview
 
-The bridge enables BTC <-> wBTC (on Starknet) transfers using an optimistic protocol
+The bridge enables BTC <-> wBTC (on Ethereum) transfers using an optimistic protocol
 with one-round fraud proofs via garbled circuits.
 
 ### Deposit Flow (BTC -> wBTC)
-1. Depositor locks BTC in `requestTx` (output 0: P2TR deposit, output 1: OP_RETURN with Starknet address) — spendable by the committee OR by the depositor after timeout (revealing `depositSecret`)
+1. Depositor locks BTC in `requestTx` (output 0: P2TR deposit, output 1: OP_RETURN with Ethereum address) — spendable by the committee OR by the depositor after timeout (revealing `depositSecret`)
 2. Committee presigns `depositTx`, moving the BTC under committee control
-3. On Starknet, wBTC is minted after Bitcoin finality (via the MintingContract)
+3. On Ethereum, wBTC is minted after Bitcoin finality (via the `MintingContract`)
 4. If anything goes wrong, depositor can reclaim via `cancelTx` (reveals `depositSecret`, which also cancels the L2 mint)
 
 ### Withdrawal Flow (wBTC -> BTC)
-1. User burns wBTC on Starknet
+1. User burns wBTC on Ethereum
 2. Operator posts `kickoffTx` — consumes 3 fanout leaf UTXOs (one per Lamport chunk) and commits a 256-byte SNARK proof via Lamport signature across the 3 inputs
 3. Challenge period: anyone can evaluate the garbled circuit; if the proof is invalid, the GC reveals a wire label (the `disproveSecret`) that allows spending via `disproveTx`, burning the connector and blocking withdrawal
 4. After timeout, operator claims via `withdrawTx` (two inputs: deposit UTXO presigned by committee + surviving connector)
@@ -43,7 +43,7 @@ Each `kickoffTx` consumes one triple of fanout leaf UTXOs (3 inputs), forcing th
 ### Actors
 - **Committee** (n-of-n): presigns deposit and withdraw transactions. Static signer set. Must be online for new deposits.
 - **Operators** (`1..n`): front withdrawals, post proofs, claim deposits after timeout. Not involved in deposit presigning.
-- **Depositors** (`1..DEPOSIT_COUNT`): lock BTC, receive wBTC on Starknet.
+- **Depositors** (`1..DEPOSIT_COUNT`): lock BTC, receive wBTC on Ethereum.
 - **Challengers** (permissionless): verify proofs, submit disprove transactions if fraud detected.
 
 ### Presigning Model
@@ -70,7 +70,7 @@ All `SIGHASH_ALL` except `withdrawTx` input 0 which uses `SIGHASH_SINGLE` — th
 | Lamport chunking | 3 UTXOs per deposit slot | Tapscript stack limit is 1000 items; per-bit verification peaks at N+2 (OP_DUP + pubkey push), so max 998 bits per script. 2048 bits / 998 = 3 chunks. The `lamport` crate exposes `verification_script_for_range` / `witness_data_for_range`; `operator/` wires chunks to fanout outputs and kickoff inputs. |
 | Lamport over Winternitz | Lamport | 1:1 mapping to garbled circuit wire labels |
 | BitVM engine | Trait (black box) | GC/SNARK verification out of scope; mock in tests |
-| Starknet contract | Cairo (Scarb 2.16.1) | `starknet/` — MintingContract: ERC20 wBTC, verifies BIP340 sig + BIP341 sighash on-chain, mint/cancel/burn. Uses `alexandria_btc` for taproot/BIP340. Built with `scarb build`, tested with `snforge`. |
+| Ethereum contract | Solidity 0.8.24 (Foundry) | `ethereum/` — `MintingContract`: ERC20 wBTC, verifies BIP340 sig + BIP341 sighash on-chain, mint/cancel/burn. BIP340 uses the ecrecover trick for secp256k1 scalar ops. Built with `forge build`, tested with `forge test`. |
 | Committee signing | Direct signing functions | `committee/deposit.rs` and `committee/withdraw.rs`; MuSig2 aggregation deferred to CLI/server layer |
 | Script execution | `BitcoinNetwork` enum | All verification through live bitcoind (`Regtest` mode). Chain monitoring via `broadcast_tx`, `get_raw_transaction`, `get_block_at_height`, `get_chain_tip`, `poll_new_blocks`. |
 | Anchor outputs | Operator-keyed P2TR anchor on `kickoffTx` only | `kickoffTx` anchor is operator-keyed (prevents replacement cycling). `depositTx` has no anchor (fee set at presign time). `withdrawTx` uses `SIGHASH_SINGLE` on input 0 with OP_RETURN at output 0 (operator sets fee via additional outputs) |
@@ -130,23 +130,25 @@ ideal-bridge/
 │   │   ├── kickoff.rs          # KickoffData + extract_proof_from_kickoff (witness parsing)
 │   │   ├── disprove.rs         # build_disprove_tx, witness_disprove_tx
 │   │   └── main.rs             # placeholder
-├── starknet/                   # Cairo contract (Scarb project, not in Cargo workspace)
-│   ├── Scarb.toml              # deps: openzeppelin, alexandria_btc; casm = true
+├── ethereum/                   # Solidity contracts (Foundry project, not in Cargo workspace)
+│   ├── foundry.toml            # solc 0.8.24, via_ir, optimizer_runs=200
+│   ├── remappings.txt          # @openzeppelin/, forge-std/
+│   ├── lib/
+│   │   ├── openzeppelin-contracts/
+│   │   └── forge-std/
 │   ├── src/
-│   │   ├── lib.cairo           # module root
-│   │   ├── minting_contract.cairo  # MintingContract: request, mint, cancel, burn (ERC20 wBTC)
-│   │   ├── types.cairo         # DepositInfo, DepositStatus, DUST_AMOUNT
-│   │   ├── deposit_tx.cairo    # compute_deposit_sighash (deterministic depositTx BIP341 sighash)
-│   │   ├── tx_parser.cairo     # parse_request_tx: txid, output0 amount/scriptPubKey, OP_RETURN
-│   │   └── bip341.cairo        # taproot_sighash (BIP341 key-spend SIGHASH_DEFAULT)
-│   └── tests/test_minting.cairo  # 5 snforge unit tests
+│   │   ├── MintingContract.sol # ERC20 wBTC (8 decimals): request, mint, cancel, burn
+│   │   ├── BIP340.sol          # Schnorr verification via ecrecover trick
+│   │   ├── BIP341.sol          # taprootSighash (BIP341 key-spend SIGHASH_DEFAULT)
+│   │   └── TxParser.sol        # parseRequestTx: txid (double-sha256), output0 amount/scriptPubKey, OP_RETURN
+│   └── test/MintingContract.t.sol  # 5 forge tests (incl. BIP340 vector validation)
 ├── e2e/                        # end-to-end integration tests across all actor clients
 │   ├── Cargo.toml
 │   ├── tests/e2e.rs            # 6 Bitcoin-only tests: happy path withdraw, cancel escape hatch, fraud proof disprove, ignore valid proof, extract proof from kickoff, withdraw with modified payment output
-│   ├── tests/starknet_e2e.rs   # 7 cross-chain tests: happy path mint, cancel blocks mint, early mint rejected, invalid sig, duplicate request, burn after mint, cancel after mint
-│   └── tests/starknet_e2e/
-│       ├── devnet.rs           # DevnetNode: starknet-devnet lifecycle, declare (via sncast), deploy
-│       └── helpers.rs          # calldata serialization: ByteArray, u256, BIP340 sig encoding
+│   ├── tests/ethereum_e2e.rs   # 7 cross-chain Ethereum tests: happy path mint, cancel blocks mint, early mint rejected, invalid sig, duplicate request, burn after mint, cancel after mint
+│   └── tests/ethereum_e2e/
+│       ├── anvil.rs            # AnvilNode: anvil lifecycle, forge build, alloy provider, deploy MintingContract
+│       └── helpers.rs          # bitcoin tx → non-witness bytes, schnorr sig → (bytes32, bytes32)
 ```
 
 ### Transaction Ownership
@@ -169,8 +171,8 @@ Each actor crate owns the build/sign logic for the transactions it creates:
 1. `lamport` — keygen, sign, Bitcoin Script verification, unit tests
 2. `bridge` — shared types: `params`, `actor` (data-only), `engine`, `scripts`, `transactions/fanout` + `transactions/kickoff` (shared types only), `network` + `regtest`
 3. Actor crates (each depends on `bridge`): `committee`, `operator`, `depositor`, `challenger`
-4. `starknet/` — Cairo contract (independent Scarb project): `scarb build` then `snforge test`
-5. `e2e` — end-to-end integration tests (Bitcoin-only + cross-chain Starknet)
+4. `ethereum/` — Solidity contract (independent Foundry project): `forge build` then `forge test`
+5. `e2e` — end-to-end integration tests (Bitcoin-only + cross-chain Ethereum)
 
 ## Parameters (defaults)
 

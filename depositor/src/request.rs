@@ -19,7 +19,7 @@ use bridge::BridgeError;
 ///
 /// - Input: depositor's `request_utxo` (signed by depositor at broadcast time)
 /// - Output 0: `DEPOSIT_SIZE` locked in P2TR (committee key-spend + cancel script leaf)
-/// - Output 1: OP_RETURN with 32-byte Starknet recipient address
+/// - Output 1: OP_RETURN with 20-byte Ethereum recipient address
 pub fn build_request_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     depositor: &Depositor,
@@ -36,10 +36,10 @@ pub fn build_request_tx(
 
     let script_pubkey = ScriptBuf::new_p2tr_tweaked(spend_info.output_key());
 
-    // OP_RETURN output with 32-byte Starknet address
+    // OP_RETURN output with 20-byte Ethereum address
     let op_return_script = Builder::new()
         .push_opcode(OP_RETURN)
-        .push_slice(depositor.starknet_address)
+        .push_slice(depositor.eth_address)
         .into_script();
 
     Ok(Transaction {

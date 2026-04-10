@@ -19,8 +19,8 @@ pub struct Depositor {
     pub index: usize,
     pub request_utxo: OutPoint,
     pub deposit_secret: [u8; 32],
-    /// 32-byte Starknet address where wBTC will be minted (embedded in requestTx OP_RETURN).
-    pub starknet_address: [u8; 32],
+    /// 20-byte Ethereum address where wBTC will be minted (embedded in requestTx OP_RETURN).
+    pub eth_address: [u8; 20],
 }
 
 pub struct Committee {
@@ -84,17 +84,15 @@ impl Depositor {
         let (pubkey, _) = keypair.x_only_public_key();
         let mut deposit_secret = [0u8; 32];
         rng.fill(&mut deposit_secret);
-        let mut starknet_address = [0u8; 32];
-        rng.fill(&mut starknet_address);
-        // Starknet addresses must be < 2^251, clear the top bit
-        starknet_address[0] &= 0x07;
+        let mut eth_address = [0u8; 20];
+        rng.fill(&mut eth_address);
         Self {
             keypair,
             pubkey,
             index,
             request_utxo,
             deposit_secret,
-            starknet_address,
+            eth_address,
         }
     }
 
