@@ -51,101 +51,67 @@ contract MintingContractTest is Test {
         minting.burn(1);
     }
 
-    /// Exercise BIP340.verify against the reference BIP340 test vectors from
-    /// https://github.com/bitcoin/bips/blob/master/bip-0340/test-vectors.csv.
-    /// Covers a mix of positive vectors and the edge-case negative vectors
-    /// that exercise the explicit range/validity checks in `BIP340.verify`.
-    function testBIP340Vectors() public view {
-        // --- Positive vectors ---
+    /// All BIP340 test vectors from the official reference CSV:
+    /// https://github.com/bitcoin/bips/blob/master/bip-0340/test-vectors.csv
+    ///
+    /// Vectors 15–18 have non-32-byte messages and are skipped automatically
+    /// (our BIP340.verify accepts only bytes32, matching the contract's use case).
+    function testBIP340Vectors() public {
+        string memory path = "test/fixtures/bip340-test-vectors.csv";
+        vm.readLine(path); // skip header
 
-        // Vector index 0
-        assertTrue(BIP340.verify(
-            bytes32(0xF9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9),
-            bytes32(0xE907831F80848D1069A5371B402410364BDF1C5F8307B0084C55F1CE2DCA8215),
-            bytes32(0x25F66A4A85EA8B71E482A74F382D2CE5EBEEE8FDB2172F477DF4900D310536C0),
-            bytes32(0x0000000000000000000000000000000000000000000000000000000000000000)
-        ));
+        uint256 tested;
+        for (uint256 i = 0; i < 19; i++) {
+            string memory line = vm.readLine(path);
+            if (bytes(line).length == 0) break;
 
-        // Vector index 1
-        assertTrue(BIP340.verify(
-            bytes32(0xDFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659),
-            bytes32(0x6896BD60EEAE296DB48A229FF71DFE071BDE413E6D43F917DC8DCF8C78DE3341),
-            bytes32(0x8906D11AC976ABCCB20B091292BFF4EA897EFCB639EA871CFA95F6DE339E4B0A),
-            bytes32(0x243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89)
-        ));
+            // Locate the 7 commas separating the 8 CSV fields.
+            bytes memory b = bytes(line);
+            uint256[7] memory c;
+            uint256 pos;
+            for (uint256 j = 0; j < 7; j++) {
+                pos = _nextComma(b, pos);
+                c[j] = pos;
+                pos++;
+            }
 
-        // Vector index 2
-        assertTrue(BIP340.verify(
-            bytes32(0xDD308AFEC5777E13121FA72B9CC1B7CC0139715309B086C960E18FD969774EB8),
-            bytes32(0x5831AAEED7B44BB74E5EAB94BA9D4294C49BCF2A60728D8B4C200F50DD313C1B),
-            bytes32(0xAB745879A5AD954A72C45A91C3A51D3C7ADEA98D82F8481E0E1E03674A6F3FB7),
-            bytes32(0x7E2D58D8B3BCDF1ABADEC7829054F90DDA9805AAB56C77333024B9D0A508B75C)
-        ));
+            // field 4 = message hex (between commas 3 and 4)
+            uint256 msgStart = c[3] + 1;
+            uint256 msgLen = c[4] - msgStart;
+            if (msgLen != 64) continue; // skip non-32-byte messages
 
-        // --- Negative vectors from the reference CSV ---
-        // These use a common valid pubkey & message, varying the (rx, s) pair
-        // to hit each rejection branch.
-        bytes32 px  = 0xDFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659;
-        bytes32 msg_ = 0x243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89;
+            bytes32 pk = _hex32(b, c[1] + 1);
+            bytes32 m  = _hex32(b, msgStart);
+            bytes32 rx = _hex32(b, c[4] + 1);
+            bytes32 s  = _hex32(b, c[4] + 65);
+            bool expect = uint8(b[c[5] + 1]) == 0x54; // 'T' = TRUE
 
-        // Vector index 5: public key not on the curve. (Different px.)
-        assertFalse(BIP340.verify(
-            bytes32(0xEEFDEA4CDB677750A420FEE807EACF21EB9898AE79B9768766E4FAA04A2D4A34),
-            bytes32(0x6CFF5C3BA86C69EA4B7376F31A9BCB4F74C1976089B2D9963DA2E5543E177769),
-            bytes32(0x69961764B3AA9B2FFCB6EF947B6887A226E8D7C93E00C5ED0C1834FF0D0C2E6D),
-            msg_
-        ));
+            assertEq(BIP340.verify(pk, rx, s, m), expect, string.concat("vector ", vm.toString(i)));
+            tested++;
+        }
+        assertEq(tested, 15, "expected 15 applicable vectors");
+    }
 
-        // Vector index 7: negated message (sig is valid but for -m).
-        assertFalse(BIP340.verify(
-            px,
-            bytes32(0x1FA62E331EDBC21C394792D2AB1100A7B432B013DF3F6FF4F99FCB33E0E1515F),
-            bytes32(0x28890B3EDB6E7189B630448B515CE4F8622A954CFE545735AAEA5134FCCDB2BD),
-            msg_
-        ));
+    function _nextComma(bytes memory b, uint256 from) private pure returns (uint256) {
+        for (uint256 i = from; i < b.length; i++) {
+            if (uint8(b[i]) == 0x2C) return i;
+        }
+        return b.length;
+    }
 
-        // Vector index 8: negated s value.
-        assertFalse(BIP340.verify(
-            px,
-            bytes32(0x6CFF5C3BA86C69EA4B7376F31A9BCB4F74C1976089B2D9963DA2E5543E177769),
-            bytes32(0xFD0B48C3C7F0CE65A6A47C9D90C7EDBC0D8E80E7D0C6FD3D3DC4EEBEFBB1DD44),
-            msg_
-        ));
+    function _hex32(bytes memory b, uint256 offset) private pure returns (bytes32 result) {
+        for (uint256 i = 0; i < 32; i++) {
+            uint8 hi = _hexVal(uint8(b[offset + 2 * i]));
+            uint8 lo = _hexVal(uint8(b[offset + 2 * i + 1]));
+            result |= bytes32(bytes1(uint8(hi << 4 | lo))) >> (i * 8);
+        }
+    }
 
-        // Vector index 11: sig[0:32] (rx) equals the field size p — must fail
-        // the `rxU >= P` guard.
-        assertFalse(BIP340.verify(
-            px,
-            bytes32(0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F),
-            bytes32(0x7615FBAF5AE28864013C099742DEADB4DBA87F11AC6754F93780D5A1837CF197),
-            msg_
-        ));
-
-        // Vector index 12: sig[32:64] (s) equals the curve order n — must fail
-        // the `sU >= N` guard.
-        assertFalse(BIP340.verify(
-            px,
-            bytes32(0x6CFF5C3BA86C69EA4B7376F31A9BCB4F74C1976089B2D9963DA2E5543E177769),
-            bytes32(0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141),
-            msg_
-        ));
-
-        // Vector index 13: public key > field size — must fail the
-        // `pxU >= P` guard (or liftX, whichever catches it first).
-        assertFalse(BIP340.verify(
-            bytes32(0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC30),
-            bytes32(0x6CFF5C3BA86C69EA4B7376F31A9BCB4F74C1976089B2D9963DA2E5543E177769),
-            bytes32(0x3B5D5165383C2AAE0867F69AD90DC48FEFEBAE01F00C722AA2EAC13776A27370),
-            msg_
-        ));
-
-        // Trivially zeroed signature should also fail.
-        assertFalse(BIP340.verify(
-            bytes32(0xF9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9),
-            bytes32(0),
-            bytes32(0),
-            bytes32(0)
-        ));
+    function _hexVal(uint8 c) private pure returns (uint8) {
+        if (c >= 0x30 && c <= 0x39) return c - 0x30; // '0'-'9'
+        if (c >= 0x41 && c <= 0x46) return c - 0x37; // 'A'-'F'
+        if (c >= 0x61 && c <= 0x66) return c - 0x57; // 'a'-'f'
+        revert("bad hex");
     }
 
     /// TxParser should reject malformed / truncated transactions with a clear

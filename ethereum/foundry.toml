@@ -12,6 +12,8 @@ remappings = [
   "forge-std/=lib/forge-std/src/",
 ]
 
+fs_permissions = [{ access = "read", path = "./test/fixtures" }]
+
 [lint]
 # Intentional lossy casts in LE encoding; style lints on internal variable names.
 exclude_lints = ["unsafe-typecast", "mixed-case-variable", "screaming-snake-case-immutable"]
