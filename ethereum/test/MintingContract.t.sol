@@ -15,15 +15,17 @@ contract TxParserHarness {
 }
 
 contract MintingContractTest is Test {
-    // Dummy tweaked committee pubkey (valid x-only, lifts to a point).
+    // Dummy committee internal pubkey (valid x-only, lifts to a point).
     // This is generator.x, which is a valid curve point.
-    bytes32 constant DUMMY_TWEAKED_PK = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798;
+    bytes32 constant DUMMY_INTERNAL_PK = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798;
+    // Dummy deposit tweaked pubkey (different valid point).
+    bytes32 constant DUMMY_TWEAKED_PK = 0xC6047F9441ED7D6D3045406E95C07CD85C778E4B8CEF3CA7ABAC09B95C709EE5;
     uint64 constant MINT_DELAY = 86400;
 
     MintingContract minting;
 
     function setUp() public {
-        minting = new MintingContract(DUMMY_TWEAKED_PK, MINT_DELAY);
+        minting = new MintingContract(DUMMY_INTERNAL_PK, DUMMY_TWEAKED_PK, MINT_DELAY);
     }
 
     function testDeploy() public view {

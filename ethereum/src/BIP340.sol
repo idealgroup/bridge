@@ -116,6 +116,69 @@ library BIP340 {
         }
     }
 
+    /// @notice Verify a BIP340 signature against a taproot-tweaked key, given
+    ///         the untweaked internal key and a pre-adjusted signature scalar.
+    ///
+    /// The caller pre-computes `adjustedS` off-chain:
+    ///   - Even y (tweakedKeyOddY=false): adjustedS = s − e·t mod n
+    ///   - Odd  y (tweakedKeyOddY=true):  adjustedS = s + e·t mod n
+    /// where t = H("TapTweak", P.x || merkleRoot),
+    ///       e = H("BIP0340/challenge", rx || tweakedPx || m).
+    ///
+    /// Security: forging requires breaking standard BIP340 Schnorr
+    /// unforgeability against the committee's internal key.
+    ///
+    /// @param internalPx       committee's untweaked x-only pubkey
+    /// @param tweakedPx        claimed tweaked x-only pubkey (used in BIP340 challenge)
+    /// @param rx               signature R.x
+    /// @param adjustedS        pre-adjusted s' scalar
+    /// @param m                message (BIP341 sighash)
+    /// @param tweakedKeyOddY   true if the tweaked point Q has odd y
+    function verifyTweaked(
+        bytes32 internalPx,
+        bytes32 tweakedPx,
+        bytes32 rx,
+        bytes32 adjustedS,
+        bytes32 m,
+        bool tweakedKeyOddY
+    ) internal view returns (bool) {
+        uint256 ipxU = uint256(internalPx);
+        uint256 rxU  = uint256(rx);
+        uint256 asU  = uint256(adjustedS);
+
+        if (rxU >= P || asU >= N) return false;
+        if (ipxU == 0 || ipxU >= P) return false;
+        (bool ipxOk, ) = liftX(ipxU);
+        if (!ipxOk) return false;
+
+        // e = H("BIP0340/challenge", rx || tweakedPx || m) mod n
+        uint256 e = uint256(taggedHash("BIP0340/challenge", abi.encodePacked(rx, tweakedPx, m))) % N;
+
+        // Expected R point address
+        (bool rxOk, uint256 ry) = liftX(rxU);
+        if (!rxOk) return false;
+        address expectedR = pubkeyToAddress(rxU, ry);
+
+        // msgHash = (N - adjustedS) · ipx mod N  (same for both parities)
+        uint256 msgHash = mulmod(N - asU, ipxU, N);
+
+        // sigS differs by parity of the tweaked key:
+        //   Even y: verify s'·G = R + e·P  →  sigS = (N−e)·ipx
+        //   Odd  y: verify s'·G + e·P = R  →  sigS = e·ipx
+        uint256 sigS = tweakedKeyOddY
+            ? mulmod(e, ipxU, N)
+            : mulmod(N - e, ipxU, N);
+
+        address recovered = ecrecover(
+            bytes32(msgHash),
+            27,
+            bytes32(ipxU),
+            bytes32(sigS)
+        );
+
+        return recovered != address(0) && recovered == expectedR;
+    }
+
     /// @notice Tagged hash per BIP340: sha256(sha256(tag) || sha256(tag) || msg)
     function taggedHash(string memory tag, bytes memory data) internal pure returns (bytes32) {
         bytes32 tagHash = sha256(bytes(tag));

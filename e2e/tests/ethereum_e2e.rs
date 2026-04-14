@@ -15,6 +15,7 @@ use alloy::sol_types::SolCall;
 use bridge::actor::{Committee, Depositor};
 use bridge::network::BitcoinNetwork;
 use bridge::params::Params;
+use bridge::scripts;
 use bridge::test_support::{dummy_outpoint, test_rng_seeded};
 use committee::CommitteeClient;
 use depositor::DepositorClient;
@@ -38,6 +39,7 @@ struct TestFixture {
     deposit_secret_hash: B256,
     sig_rx: B256,
     sig_s: B256,
+    tweaked_key_odd_y: bool,
     recipient: Address,
     /// Expected wBTC mint amount in satoshis — equal to the depositTx output value
     /// (request output minus DUST_AMOUNT). This is the value actually locked in
@@ -92,7 +94,7 @@ async fn setup() -> TestFixture {
     let sig_bytes: [u8; 64] = deposit_tx.input[0].witness[0][..64]
         .try_into()
         .expect("σ must be 64 bytes");
-    let (sig_rx, sig_s) = helpers::schnorr_sig_to_bytes32_pair(&sig_bytes);
+    let sig_rx = B256::from_slice(&sig_bytes[0..32]);
 
     // 6. Serialize requestTx in non-witness format (for the contract parser).
     let raw_request_tx_bytes = helpers::serialize_tx_no_witness(&request_tx);
@@ -104,9 +106,29 @@ async fn setup() -> TestFixture {
     let tweaked_pk_bytes: [u8; 32] = tweaked_output.serialize();
     let deposit_tweaked_pk = B256::from_slice(&tweaked_pk_bytes);
 
-    // 8. Start anvil and deploy the minting contract.
+    // 8. Compute the adjusted signature scalar for verifyTweaked.
+    let request_spend_info = scripts::request_spend_info(
+        &secp,
+        committee_client.committee.pubkey,
+        dep_client.depositor.pubkey,
+        dep_client.depositor.deposit_secret_hash(),
+        params.deposit_timeout,
+    )
+    .unwrap();
+    let (sig_s, tweaked_key_odd_y) = helpers::compute_adjusted_sig(
+        sig_bytes[0..32].try_into().unwrap(),
+        sig_bytes[32..64].try_into().unwrap(),
+        &deposit_tx,
+        &request_tx.output[0],
+        &request_spend_info,
+    );
+
+    // 9. Start anvil and deploy the minting contract.
+    let committee_internal_pk = B256::from_slice(&committee_client.committee.pubkey.serialize());
     let anvil = AnvilNode::start().await;
-    let contract_address = anvil.deploy_minting_contract(deposit_tweaked_pk, 86400).await;
+    let contract_address = anvil
+        .deploy_minting_contract(committee_internal_pk, deposit_tweaked_pk, 86400)
+        .await;
 
     let deposit_secret = B256::from_slice(&dep_client.depositor.deposit_secret);
     let deposit_secret_hash = B256::from_slice(&dep_client.depositor.deposit_secret_hash());
@@ -120,6 +142,7 @@ async fn setup() -> TestFixture {
         deposit_secret_hash,
         sig_rx,
         sig_s,
+        tweaked_key_odd_y,
         recipient,
         expected_mint_amount: deposit_tx.output[0].value.to_sat(),
     }
@@ -137,6 +160,7 @@ async fn test_happy_path() {
         f.deposit_secret_hash,
         f.sig_rx,
         f.sig_s,
+        f.tweaked_key_odd_y,
     )
     .send()
     .await
@@ -170,6 +194,7 @@ async fn test_cancel_blocks_mint() {
         f.deposit_secret_hash,
         f.sig_rx,
         f.sig_s,
+        f.tweaked_key_odd_y,
     )
     .send()
     .await
@@ -205,6 +230,7 @@ async fn test_early_mint_rejected() {
         f.deposit_secret_hash,
         f.sig_rx,
         f.sig_s,
+        f.tweaked_key_odd_y,
     )
     .send()
     .await
@@ -233,6 +259,7 @@ async fn test_invalid_signature() {
             f.deposit_secret_hash,
             B256::ZERO,
             B256::ZERO,
+            f.tweaked_key_odd_y,
         )
         .send()
         .await
@@ -254,6 +281,7 @@ async fn test_duplicate_request() {
         f.deposit_secret_hash,
         f.sig_rx,
         f.sig_s,
+        f.tweaked_key_odd_y,
     )
     .send()
     .await
@@ -268,6 +296,7 @@ async fn test_duplicate_request() {
             f.deposit_secret_hash,
             f.sig_rx,
             f.sig_s,
+            f.tweaked_key_odd_y,
         )
         .send()
         .await
@@ -289,6 +318,7 @@ async fn test_burn_after_mint() {
         f.deposit_secret_hash,
         f.sig_rx,
         f.sig_s,
+        f.tweaked_key_odd_y,
     )
     .send()
     .await
@@ -370,6 +400,7 @@ async fn test_cancel_after_mint() {
         f.deposit_secret_hash,
         f.sig_rx,
         f.sig_s,
+        f.tweaked_key_odd_y,
     )
     .send()
     .await
