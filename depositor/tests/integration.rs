@@ -2,10 +2,9 @@ use bitcoin::secp256k1::Secp256k1;
 use bitcoin::transaction::TxOut;
 
 use bridge::actor::{Committee, Depositor};
-use bridge::network::BITCOIN_NETWORK;
 use bridge::params::Params;
 use bridge::scripts;
-use bridge::test_support::{test_rng_seeded, dummy_outpoint};
+use bridge::test_support::{test_rng_seeded, dummy_outpoint, BITCOIN_NETWORK};
 
 use depositor::DepositorClient;
 
@@ -96,8 +95,7 @@ fn test_depositor_cancel_before_timeout_rejected() {
         request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
     let depositor_prevout = TxOut {
         value: params.request_input_value(),
-        script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
-            .script_pubkey(),
+        script_pubkey: bitcoin::ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),
     };
     request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout])
         .unwrap();

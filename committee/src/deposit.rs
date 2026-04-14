@@ -5,7 +5,7 @@ use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
-use bitcoin::{Address, Network, ScriptBuf, Txid, Witness};
+use bitcoin::{ScriptBuf, Txid, Witness};
 
 use bridge::params::Params;
 use bridge::BridgeError;
@@ -20,8 +20,6 @@ pub fn build_deposit_tx(
     committee_pubkey: XOnlyPublicKey,
     params: &Params,
 ) -> Result<Transaction, BridgeError> {
-    let committee_address = Address::p2tr(secp, committee_pubkey, None, Network::Bitcoin);
-
     Ok(Transaction {
         version: Version::TWO,
         lock_time: LockTime::ZERO,
@@ -33,7 +31,7 @@ pub fn build_deposit_tx(
         }],
         output: vec![TxOut {
             value: params.deposit_size,
-            script_pubkey: committee_address.script_pubkey(),
+            script_pubkey: ScriptBuf::new_p2tr(secp, committee_pubkey, None),
         }],
     })
 }

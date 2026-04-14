@@ -4,7 +4,7 @@ use bitcoin::key::{Keypair, TapTweak};
 use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::sighash::{Prevouts, SighashCache};
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
-use bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid, Witness};
+use bitcoin::{OutPoint, ScriptBuf, Txid, Witness};
 
 use bridge::actor::{Committee, Depositor, Operator};
 use bridge::engine::MockEngine;
@@ -127,11 +127,9 @@ fn test_happy_path_deposit_and_withdraw() {
 
     // === 11. Assert withdraw output pays operator deposit_size ===
     assert_eq!(withdraw_tx.output[1].value, params.deposit_size);
-    let operator_address =
-        Address::p2tr(&secp, op_client.operator.pubkey, None, Network::Bitcoin);
     assert_eq!(
         withdraw_tx.output[1].script_pubkey,
-        operator_address.script_pubkey()
+        ScriptBuf::new_p2tr(&secp, op_client.operator.pubkey, None)
     );
 }
 
@@ -212,9 +210,9 @@ fn test_withdraw_operator_can_modify_payment_output() {
     let fee = bitcoin::Amount::from_sat(10_000);
     let alt_sk = bitcoin::secp256k1::SecretKey::new(&mut rng);
     let alt_pk = alt_sk.x_only_public_key(&secp).0;
-    let alt_address = Address::p2tr(&secp, alt_pk, None, Network::Bitcoin);
+    let alt_script_pubkey = ScriptBuf::new_p2tr(&secp, alt_pk, None);
     withdraw_tx.output[1].value = params.deposit_size - fee;
-    withdraw_tx.output[1].script_pubkey = alt_address.script_pubkey();
+    withdraw_tx.output[1].script_pubkey = alt_script_pubkey.clone();
 
     // Store modified tx and proceed
     op_client.receive_presigned_withdraw(withdraw_tx).unwrap();
@@ -242,7 +240,7 @@ fn test_withdraw_operator_can_modify_payment_output() {
 
     // === 10. Assert output[1] has modified value and different address ===
     assert_eq!(withdraw_tx.output[1].value, params.deposit_size - fee);
-    assert_eq!(withdraw_tx.output[1].script_pubkey, alt_address.script_pubkey());
+    assert_eq!(withdraw_tx.output[1].script_pubkey, alt_script_pubkey);
 
     // === 11. Alt key spends the withdraw output ===
     let withdraw_txid = withdraw_tx.compute_txid();
@@ -261,7 +259,7 @@ fn test_withdraw_operator_can_modify_payment_output() {
         }],
         output: vec![TxOut {
             value: spend_value,
-            script_pubkey: alt_address.script_pubkey(),
+            script_pubkey: alt_script_pubkey.clone(),
         }],
     };
 
@@ -326,11 +324,9 @@ fn test_cancel_escape_hatch() {
 
     // === 5. Assert cancel output pays depositor deposit_size ===
     assert_eq!(cancel_tx.output[0].value, params.deposit_size);
-    let depositor_address =
-        Address::p2tr(&secp, dep_client.depositor.pubkey, None, Network::Bitcoin);
     assert_eq!(
         cancel_tx.output[0].script_pubkey,
-        depositor_address.script_pubkey()
+        ScriptBuf::new_p2tr(&secp, dep_client.depositor.pubkey, None)
     );
 }
 
@@ -524,8 +520,7 @@ fn test_extract_proof_from_kickoff() {
     let mut tree = operator::fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
     let init_txout = TxOut {
         value: params.fanout_init_value(),
-        script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin)
-            .script_pubkey(),
+        script_pubkey: ScriptBuf::new_p2tr(&secp, operator.pubkey, None),
     };
     operator::fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params)
         .unwrap();

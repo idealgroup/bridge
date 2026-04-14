@@ -20,11 +20,11 @@ contract MintingContract is ERC20 {
     uint32 internal constant LOCKTIME = 0;
     uint32 internal constant SEQUENCE_RBF = 0xFFFFFFFD;
 
-    /// @notice Deposit output scriptPubKey: `0x51 0x20 || tweaked_committee_x`
-    ///         where `tweaked_committee_x` = x-only of P + int(tagged_hash("TapTweak", P))·G
-    ///         (BIP341 tap tweak, no script tree). Pre-computed off-chain at
-    ///         deployment time to avoid expensive on-chain scalar multiplication.
-    bytes public depositScriptPubkey;
+    /// @notice Deposit output tweaked committee pubkey (x-only): committee internal
+    ///         key tweaked per BIP341 with no script tree. Pre-computed off-chain
+    ///         at deployment time to avoid on-chain scalar multiplication. The
+    ///         corresponding P2TR scriptPubKey is `0x51 0x20 || depositTweakedPubkey`.
+    bytes32 public immutable depositTweakedPubkey;
 
     /// @notice Mint delay, in seconds.
     uint64 public immutable mintDelay;
@@ -56,8 +56,13 @@ contract MintingContract is ERC20 {
     ///        tree). Computed off-chain by the deployer.
     /// @param _mintDelay Number of seconds between `request` and `mint`.
     constructor(bytes32 _depositTweakedPubkey, uint64 _mintDelay) ERC20("Wrapped BTC", "wBTC") {
-        depositScriptPubkey = abi.encodePacked(bytes1(0x51), bytes1(0x20), _depositTweakedPubkey);
+        depositTweakedPubkey = _depositTweakedPubkey;
         mintDelay = _mintDelay;
+    }
+
+    /// @notice P2TR scriptPubKey of the committee's deposit output.
+    function depositScriptPubkey() public view returns (bytes memory) {
+        return abi.encodePacked(bytes1(0x51), bytes1(0x20), depositTweakedPubkey);
     }
 
     /// @notice wBTC uses 8 decimals to mirror Bitcoin's satoshi precision.
@@ -109,7 +114,7 @@ contract MintingContract is ERC20 {
             spk,
             SEQUENCE_RBF,
             depositOutputAmount,
-            depositScriptPubkey,
+            depositScriptPubkey(),
             0x00, // spend_type: key-path
             0     // input_index
         );

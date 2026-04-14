@@ -18,8 +18,13 @@ use bridge::BridgeError;
 /// Builds a request transaction.
 ///
 /// - Input: depositor's `request_utxo` (signed by depositor at broadcast time)
-/// - Output 0: `DEPOSIT_SIZE` locked in P2TR (committee key-spend + cancel script leaf)
+/// - Output 0: `request_input_value()` locked in P2TR (committee key-spend + cancel script leaf)
 /// - Output 1: OP_RETURN with 20-byte Ethereum recipient address
+///
+/// **Zero-fee requestTx.** Output 0 carries the full input value so the tx
+/// has no explicit fee. This only propagates on the regtest node
+/// (`minrelaytxfee=0`). A production deployment must add a second input to
+/// pay the relay fee — see `Params::request_input_value` for details.
 pub fn build_request_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
     depositor: &Depositor,
@@ -90,7 +95,7 @@ mod tests {
     use super::*;
     use bridge::actor::{Committee, Depositor};
     use bridge::params::Params;
-    use bitcoin::{Address, Amount, Network, OutPoint, Txid};
+    use bitcoin::{Amount, OutPoint, Txid};
     use bitcoin::hashes::Hash;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -122,7 +127,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(42);
         let params = Params::test_defaults();
 
-        use bridge::network::BITCOIN_NETWORK;
+        use bridge::test_support::BITCOIN_NETWORK;
         let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
         depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
@@ -130,8 +135,7 @@ mod tests {
         let mut tx = build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
         let prevouts = [TxOut {
             value: params.request_input_value(),
-            script_pubkey: Address::p2tr(&secp, depositor.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
+            script_pubkey: ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),
         }];
         sign_request_tx(&secp, &mut tx, &depositor.keypair, &prevouts).unwrap();
 

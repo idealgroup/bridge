@@ -17,6 +17,30 @@ pub const HASH_LEN: usize = 32;
 /// To keep peak ≤ 1000: N ≤ 998.
 pub const MAX_BITS_PER_CHUNK: usize = 998;
 
+/// Serialized size (in bytes) of the per-bit verification block produced by
+/// [`PublicKey::verification_script_for_range`]. Layout per bit:
+///
+/// ```text
+/// offset  bytes  opcode/data
+/// 0       1      OP_SHA256
+/// 1       1      OP_DUP
+/// 2       1      OP_PUSHBYTES_32
+/// 3..35   32     pk[i][0]            (hash for bit = 0)
+/// 35      1      OP_EQUAL
+/// 36      1      OP_IF
+/// 37      1      OP_DROP
+/// 38      1      OP_ELSE
+/// 39      1      OP_PUSHBYTES_32
+/// 40..72  32     pk[i][1]            (hash for bit = 1)
+/// 72      1      OP_EQUALVERIFY
+/// 73      1      OP_ENDIF
+/// ```
+pub const SCRIPT_BYTES_PER_BIT: usize = 74;
+/// Byte offset of `pk[i][0]` (bit = 0 hash) within a bit's script block.
+pub const SCRIPT_HASH0_OFFSET: usize = 3;
+/// Byte offset of `pk[i][1]` (bit = 1 hash) within a bit's script block.
+pub const SCRIPT_HASH1_OFFSET: usize = 40;
+
 /// Two random preimages per bit (one for 0, one for 1).
 pub struct SecretKey(pub [[[u8; PREIMAGE_LEN]; 2]; NUM_BITS]);
 
@@ -238,13 +262,19 @@ mod tests {
         let script = pk.verification_script();
         let script_bytes = script.as_bytes();
 
-        // Per bit: OP_SHA256(1) + OP_DUP(1) + push 32-byte hash(1+32) + OP_EQUAL(1)
-        //        + OP_IF(1) + OP_DROP(1) + OP_ELSE(1) + push 32-byte hash(1+32)
-        //        + OP_EQUALVERIFY(1) + OP_ENDIF(1)
-        // = 74 bytes per bit
-        // + 1 byte for final OP_TRUE
-        let expected_len = NUM_BITS * 74 + 1;
+        // Per-bit block size matches the public constant, plus a trailing OP_TRUE.
+        let expected_len = NUM_BITS * SCRIPT_BYTES_PER_BIT + 1;
         assert_eq!(script_bytes.len(), expected_len);
+
+        // Verify the hash offset constants match the actual script layout by
+        // reading back pk[i][0] and pk[i][1] at the documented offsets.
+        for i in 0..NUM_BITS {
+            let base = i * SCRIPT_BYTES_PER_BIT;
+            let hash0 = &script_bytes[base + SCRIPT_HASH0_OFFSET..base + SCRIPT_HASH0_OFFSET + HASH_LEN];
+            let hash1 = &script_bytes[base + SCRIPT_HASH1_OFFSET..base + SCRIPT_HASH1_OFFSET + HASH_LEN];
+            assert_eq!(hash0, pk.0[i][0]);
+            assert_eq!(hash1, pk.0[i][1]);
+        }
     }
 
     #[test]

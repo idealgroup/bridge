@@ -5,7 +5,7 @@ use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::taproot::LeafVersion;
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
-use bitcoin::{Address, Network, ScriptBuf, Witness};
+use bitcoin::{ScriptBuf, Witness};
 
 use bridge::actor::Operator;
 use bridge::params::Params;
@@ -61,7 +61,7 @@ pub fn build_kickoff_tx(
     // Output 1: operator-keyed anchor for CPFP fee bumping (only operator can spend)
     let anchor_output = TxOut {
         value: params.dust_amount,
-        script_pubkey: Address::p2tr(secp, operator.pubkey, None, Network::Bitcoin).script_pubkey(),
+        script_pubkey: ScriptBuf::new_p2tr(secp, operator.pubkey, None),
     };
 
     Ok(Transaction {
@@ -168,7 +168,7 @@ mod tests {
         let mut rng = test_rng();
         let params = Params::test_defaults();
 
-        use bridge::network::BITCOIN_NETWORK;
+        use bridge::test_support::BITCOIN_NETWORK;
 
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
         operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
@@ -176,8 +176,7 @@ mod tests {
         let mut tree = crate::fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
             value: params.fanout_init_value(),
-            script_pubkey: bitcoin::Address::p2tr(&secp, operator.pubkey, None, bitcoin::Network::Bitcoin)
-                .script_pubkey(),
+            script_pubkey: bitcoin::ScriptBuf::new_p2tr(&secp, operator.pubkey, None),
         };
         crate::fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
 
@@ -235,7 +234,7 @@ mod tests {
         let mut rng = test_rng();
         let params = Params::test_defaults();
 
-        use bridge::network::BITCOIN_NETWORK;
+        use bridge::test_support::BITCOIN_NETWORK;
 
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
         operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
@@ -243,8 +242,7 @@ mod tests {
         let mut tree = crate::fanout::build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
             value: params.fanout_init_value(),
-            script_pubkey: bitcoin::Address::p2tr(&secp, operator.pubkey, None, bitcoin::Network::Bitcoin)
-                .script_pubkey(),
+            script_pubkey: bitcoin::ScriptBuf::new_p2tr(&secp, operator.pubkey, None),
         };
         crate::fanout::sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
 

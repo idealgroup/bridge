@@ -5,6 +5,20 @@ use bridge::engine::Proof;
 use bridge::params::Params;
 use bridge::BridgeError;
 
+/// Byte layout of the fanout leaf script prefix (before the Lamport verification block):
+///
+/// ```text
+/// offset  bytes  meaning
+/// 0       1      OP_PUSHBYTES_32
+/// 1..33   32     operator x-only pubkey
+/// 33      1      OP_CHECKSIGVERIFY
+/// ```
+///
+/// See `bridge::scripts::fanout_leaf_script`. The Lamport verification block starts
+/// immediately after at offset [`FANOUT_LEAF_PREFIX_LEN`].
+const FANOUT_LEAF_PREFIX_LEN: usize = 1 + 32 + 1;
+const OPERATOR_PUBKEY_OFFSET: usize = 1;
+
 /// Data extracted from a kickoff transaction's witnesses.
 pub struct KickoffData {
     pub operator_pubkey: XOnlyPublicKey,
@@ -59,11 +73,8 @@ pub fn extract_proof_from_kickoff(
 
         let leaf_script = witness[wit_len - 2].to_vec();
 
-        // Extract operator pubkey from leaf script
-        // bytes[0]:     0x20 (OP_PUSHBYTES_32)
-        // bytes[1..33]: operator x-only pubkey (32 bytes)
-        // bytes[33]:    OP_CHECKSIGVERIFY
-        if leaf_script.len() < 34 {
+        // Extract operator pubkey from leaf script prefix (see FANOUT_LEAF_PREFIX_LEN).
+        if leaf_script.len() < FANOUT_LEAF_PREFIX_LEN {
             return Err(BridgeError::WitnessParse(
                 "leaf script too short for operator pubkey".into(),
             ));
@@ -74,8 +85,10 @@ pub fn extract_proof_from_kickoff(
                 leaf_script[0]
             )));
         }
-        let chunk_op_pk = XOnlyPublicKey::from_slice(&leaf_script[1..33])
-            .map_err(|e| BridgeError::WitnessParse(format!("operator pubkey: {e}")))?;
+        let chunk_op_pk = XOnlyPublicKey::from_slice(
+            &leaf_script[OPERATOR_PUBKEY_OFFSET..OPERATOR_PUBKEY_OFFSET + 32],
+        )
+        .map_err(|e| BridgeError::WitnessParse(format!("operator pubkey: {e}")))?;
         match operator_pubkey {
             None => operator_pubkey = Some(chunk_op_pk),
             Some(ref prev) => {
@@ -87,25 +100,24 @@ pub fn extract_proof_from_kickoff(
             }
         }
 
-        // Extract Lamport PK hashes from the leaf script
-        // Lamport verification starts at offset 34 (after 0x20 + 32-byte pubkey + OP_CHECKSIGVERIFY)
-        // Per bit: 74 bytes
-        let lamport_offset = 34;
-        let bytes_per_bit = 74;
-
+        // Extract Lamport PK hashes from the leaf script. The Lamport verification
+        // block starts immediately after the fanout leaf prefix; see the lamport
+        // crate's SCRIPT_* constants for the per-bit byte layout.
         for bit_idx in 0..num_bits {
             let global_bit = start + bit_idx;
-            let base = lamport_offset + bit_idx * bytes_per_bit;
-            if base + bytes_per_bit > leaf_script.len() {
+            let base = FANOUT_LEAF_PREFIX_LEN + bit_idx * lamport::SCRIPT_BYTES_PER_BIT;
+            if base + lamport::SCRIPT_BYTES_PER_BIT > leaf_script.len() {
                 return Err(BridgeError::WitnessParse(format!(
                     "leaf script too short for bit {}",
                     global_bit
                 )));
             }
+            let hash0_start = base + lamport::SCRIPT_HASH0_OFFSET;
+            let hash1_start = base + lamport::SCRIPT_HASH1_OFFSET;
             full_pk.0[global_bit][0]
-                .copy_from_slice(&leaf_script[base + 3..base + 35]);
+                .copy_from_slice(&leaf_script[hash0_start..hash0_start + lamport::HASH_LEN]);
             full_pk.0[global_bit][1]
-                .copy_from_slice(&leaf_script[base + 40..base + 72]);
+                .copy_from_slice(&leaf_script[hash1_start..hash1_start + lamport::HASH_LEN]);
         }
 
         // Extract preimages from witness[0..num_preimages], they are in reversed order

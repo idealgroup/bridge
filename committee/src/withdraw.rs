@@ -4,7 +4,7 @@ use bitcoin::key::{Keypair, TapTweak, UntweakedPublicKey as XOnlyPublicKey};
 use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
-use bitcoin::{Address, Network, ScriptBuf, Txid, Witness};
+use bitcoin::{ScriptBuf, Txid, Witness};
 
 use bridge::params::Params;
 use bridge::BridgeError;
@@ -22,8 +22,6 @@ pub fn build_withdraw_tx(
     operator_pubkey: XOnlyPublicKey,
     params: &Params,
 ) -> Result<Transaction, BridgeError> {
-    let operator_address = Address::p2tr(secp, operator_pubkey, None, Network::Bitcoin);
-
     Ok(Transaction {
         version: Version::TWO,
         lock_time: LockTime::ZERO,
@@ -52,7 +50,7 @@ pub fn build_withdraw_tx(
             // Output 1: operator payment (operator chooses fee via this output)
             TxOut {
                 value: params.deposit_size,
-                script_pubkey: operator_address.script_pubkey(),
+                script_pubkey: ScriptBuf::new_p2tr(secp, operator_pubkey, None),
             },
         ],
     })

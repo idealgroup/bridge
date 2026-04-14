@@ -2,9 +2,10 @@ pub mod request;
 pub mod cancel;
 
 use bitcoin::key::UntweakedPublicKey as XOnlyPublicKey;
+use bitcoin::script::ScriptBuf;
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::transaction::{Transaction, TxOut};
-use bitcoin::{Address, Network, OutPoint, Txid};
+use bitcoin::{OutPoint, Txid};
 
 use bridge::actor::Depositor;
 use bridge::params::Params;
@@ -42,8 +43,7 @@ impl DepositorClient {
         )?;
         let prevout = TxOut {
             value: self.params.request_input_value(),
-            script_pubkey: Address::p2tr(&self.secp, self.depositor.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
+            script_pubkey: ScriptBuf::new_p2tr(&self.secp, self.depositor.pubkey, None),
         };
         request::sign_request_tx(&self.secp, &mut tx, &self.depositor.keypair, &[prevout])?;
         Ok(tx)
