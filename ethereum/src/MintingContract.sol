@@ -12,13 +12,17 @@ import {TxParser} from "./TxParser.sol";
 ///         depositTx to confirm deposits, and reconstructs the BIP341 sighash
 ///         directly on-chain from the parsed requestTx bytes.
 contract MintingContract is ERC20 {
-    // Dust threshold (sats) — mirrors DUST_AMOUNT on the Bitcoin side.
-    uint64 public constant DUST_AMOUNT = 546;
+    // P2TR dust threshold (sats) — mirrors DUST_AMOUNT on the Bitcoin side.
+    uint64 public constant DUST_AMOUNT = 330;
 
     // Taproot tx constants used to reconstruct the depositTx sighash.
     uint32 internal constant TX_VERSION = 2;
     uint32 internal constant LOCKTIME = 0;
     uint32 internal constant SEQUENCE_RBF = 0xFFFFFFFD;
+
+    /// @notice Committee's untweaked x-only internal pubkey. Used by
+    ///         `verifyTweaked` to verify the signature against the internal key.
+    bytes32 public immutable committeeInternalPubkey;
 
     /// @notice Deposit output tweaked committee pubkey (x-only): committee internal
     ///         key tweaked per BIP341 with no script tree. Pre-computed off-chain
@@ -51,11 +55,17 @@ contract MintingContract is ERC20 {
     event Cancel(bytes32 indexed depositSecretHash, address cancelledBy);
     event Burn(address indexed account, uint256 amount);
 
+    /// @param _committeeInternalPubkey x-only untweaked committee pubkey.
     /// @param _depositTweakedPubkey x-only P2TR output key for the committee's
     ///        depositTx output (BIP341 tap-tweaked committee pubkey, no script
     ///        tree). Computed off-chain by the deployer.
     /// @param _mintDelay Number of seconds between `request` and `mint`.
-    constructor(bytes32 _depositTweakedPubkey, uint64 _mintDelay) ERC20("Wrapped BTC", "wBTC") {
+    constructor(
+        bytes32 _committeeInternalPubkey,
+        bytes32 _depositTweakedPubkey,
+        uint64 _mintDelay
+    ) ERC20("Wrapped BTC", "wBTC") {
+        committeeInternalPubkey = _committeeInternalPubkey;
         depositTweakedPubkey = _depositTweakedPubkey;
         mintDelay = _mintDelay;
     }
@@ -73,11 +83,18 @@ contract MintingContract is ERC20 {
     /// @notice Submit a deposit request with the committee's signature on the depositTx.
     ///
     /// Anyone can call this. The recipient is extracted from the requestTx's OP_RETURN.
+    ///
+    /// @param rawRequestTx         serialized Bitcoin requestTx (non-witness)
+    /// @param depositSecretHash    SHA256 hash of the deposit secret
+    /// @param sigRx                BIP340 signature R.x component
+    /// @param sigS                 pre-adjusted BIP340 signature s' scalar (see BIP340.verifyTweaked)
+    /// @param tweakedKeyOddY       true if the request output's tweaked key has odd y
     function request(
         bytes calldata rawRequestTx,
         bytes32 depositSecretHash,
         bytes32 sigRx,
-        bytes32 sigS
+        bytes32 sigS,
+        bool tweakedKeyOddY
     ) external {
         // Parse the requestTx
         TxParser.RequestTxData memory tx_ = TxParser.parseRequestTx(rawRequestTx);
@@ -90,21 +107,19 @@ contract MintingContract is ERC20 {
         require(tx_.output0Amount > DUST_AMOUNT, "request output too small");
         uint64 depositOutputAmount = tx_.output0Amount - DUST_AMOUNT;
 
-        // The request output is P2TR: 0x51 0x20 || <tweaked_pubkey>. The
-        // committee signed with the key tweaked by the request output's
-        // taproot tree, so we verify against the tweaked pubkey extracted
-        // directly from the output's scriptPubKey.
+        // Extract the tweaked pubkey from the requestTx output 0 (P2TR).
+        // This is the committee's internal key taptweak'd with the cancel
+        // script tree — verified below via verifyTweaked.
         bytes memory spk = tx_.output0ScriptPubkey;
         require(spk.length == 34, "bad P2TR script length");
         require(uint8(spk[0]) == 0x51 && uint8(spk[1]) == 0x20, "bad P2TR prefix");
         bytes32 tweakedPk;
         assembly {
-            // spk layout in memory: [32-byte length][data...]. Skip the 2-byte
-            // 0x5120 prefix -> offset = data_ptr + 2 = spk_ptr + 32 + 2.
             tweakedPk := mload(add(spk, 34))
         }
 
-        // Reconstruct the depositTx BIP341 sighash
+        // Reconstruct the depositTx BIP341 sighash. The prevout is the
+        // requestTx output 0 (amount + scriptPubKey parsed from rawRequestTx).
         bytes32 sighash = BIP341.taprootSighash(
             TX_VERSION,
             LOCKTIME,
@@ -119,8 +134,12 @@ contract MintingContract is ERC20 {
             0     // input_index
         );
 
-        // Verify the committee's BIP340 signature against the tweaked pubkey
-        require(BIP340.verify(tweakedPk, sigRx, sigS, sighash), "invalid committee signature");
+        // Verify the committee's BIP340 signature against the internal key.
+        // The caller pre-adjusts sigS off-chain (see BIP340.verifyTweaked).
+        require(
+            BIP340.verifyTweaked(committeeInternalPubkey, tweakedPk, sigRx, sigS, sighash, tweakedKeyOddY),
+            "invalid committee signature"
+        );
 
         // Store deposit info. `amount` is the value actually locked in the
         // committee's depositTx output (request output minus DUST_AMOUNT),

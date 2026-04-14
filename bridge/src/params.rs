@@ -20,7 +20,7 @@ impl Default for Params {
     fn default() -> Self {
         let p = Self {
             deposit_size: Amount::from_int_btc(1),
-            dust_amount: Amount::from_sat(546),
+            dust_amount: Amount::from_sat(330),
             proof_size: 256,
             deposit_count: 10_000,
             operator_count: 50,
@@ -42,7 +42,7 @@ impl Params {
     pub fn test_defaults() -> Self {
         let p = Self {
             deposit_size: Amount::from_sat(100_000),
-            dust_amount: Amount::from_sat(546),
+            dust_amount: Amount::from_sat(330),
             proof_size: 256,
             deposit_count: 4,
             operator_count: 2,

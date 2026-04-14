@@ -74,7 +74,7 @@ All `SIGHASH_ALL` except `withdrawTx` input 0 which uses `SIGHASH_SINGLE` — th
 | Committee signing | Direct signing functions | `committee/deposit.rs` and `committee/withdraw.rs`; MuSig2 aggregation deferred to CLI/server layer |
 | Script execution | `BitcoinNetwork` enum | All verification through live bitcoind (`Regtest` mode). Chain monitoring via `broadcast_tx`, `get_raw_transaction`, `get_block_at_height`, `get_chain_tip`, `poll_new_blocks`. |
 | Anchor outputs | Operator-keyed P2TR anchor on `kickoffTx` only | `kickoffTx` anchor is operator-keyed (prevents replacement cycling). `depositTx` has no anchor (fee set at presign time). `withdrawTx` uses `SIGHASH_SINGLE` on input 0 with OP_RETURN at output 0 (operator sets fee via additional outputs) |
-| Dust outputs | `DUST_AMOUNT` = 546 sats | For non-value-bearing outputs (fanout, connector, disprove) |
+| Dust outputs | `DUST_AMOUNT` = 330 sats | P2TR dust threshold for non-value-bearing outputs (fanout, connector, disprove) |
 | Timelocks | Relative (`OP_CSV` + `nSequence`) | `cancelTx` uses `OP_CSV` in script; `withdrawTx` connector timelock enforced by `nSequence` committed in committee's presigned input0 |
 | Operator coordination | Out of scope | Economic incentive only; no explicit mechanism |
 | Actor isolation | Separate crates + clients | Each actor (Operator, Depositor, Committee, Challenger) has its own crate with tx build/sign logic and a Client struct. `bridge/` is a thin shared-types layer. No shared in-memory state between actors — each must own all data for its workflow or learn it from on-chain data. |
@@ -186,7 +186,7 @@ Each actor crate owns the build/sign logic for the transactions it creates:
 - `KICKOFF_TIMEOUT`: 3 days (relative, enforced by `nSequence`)
 - `DEPOSIT_TIMEOUT`: 1 hour (relative, `OP_CSV`)
 - `PROOF_SIZE`: 256 bytes (Groth16 / BN254)
-- `DUST_AMOUNT`: 546 sats
+- `DUST_AMOUNT`: 330 sats (P2TR dust threshold)
 
 ## Code Style
 
