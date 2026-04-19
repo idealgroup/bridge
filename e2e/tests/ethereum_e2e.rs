@@ -81,7 +81,7 @@ async fn setup() -> TestFixture {
     network.mine_blocks(1).unwrap();
 
     // 5. Committee presigns the depositTx → extract the 64-byte Schnorr sig.
-    let committee_client = CommitteeClient::new(committee, params);
+    let committee_client = CommitteeClient::new(committee, params.clone());
     let request_txid = request_tx.compute_txid();
     let deposit_tx = committee_client
         .presign_deposit(
@@ -115,13 +115,14 @@ async fn setup() -> TestFixture {
         params.deposit_timeout,
     )
     .unwrap();
-    let (sig_s, tweaked_key_odd_y) = helpers::compute_adjusted_sig(
+    let (sig_s_bytes, tweaked_key_odd_y) = depositor::adjusted_sig::compute_adjusted_sig(
         sig_bytes[0..32].try_into().unwrap(),
         sig_bytes[32..64].try_into().unwrap(),
         &deposit_tx,
         &request_tx.output[0],
         &request_spend_info,
     );
+    let sig_s = B256::from_slice(&sig_s_bytes);
 
     // 9. Start anvil and deploy the minting contract.
     let committee_internal_pk = B256::from_slice(&committee_client.committee.pubkey.serialize());

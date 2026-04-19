@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 bridge = { path = "../bridge" }
 bitcoin = "0.32"
+alloy-primitives = "1"
 
 [dev-dependencies]
 rand = "0.8"
