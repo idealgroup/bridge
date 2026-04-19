@@ -4,6 +4,8 @@ use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::transaction::{Transaction, TxOut};
 
+use bridge::BridgeError;
+
 /// secp256k1 group order n.
 const SECP256K1_N: U256 = U256::from_be_bytes([
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -37,7 +39,7 @@ pub fn compute_adjusted_sig(
     deposit_tx: &Transaction,
     request_output: &TxOut,
     request_spend_info: &TaprootSpendInfo,
-) -> ([u8; 32], bool) {
+) -> Result<([u8; 32], bool), BridgeError> {
     let n = SECP256K1_N;
 
     // Parity of the tweaked output key.
@@ -47,7 +49,7 @@ pub fn compute_adjusted_sig(
     let internal_pk_bytes = request_spend_info.internal_key().serialize();
     let merkle_root_bytes = request_spend_info
         .merkle_root()
-        .expect("request output has a script tree")
+        .ok_or(BridgeError::MissingData("request spend info merkle root"))?
         .to_byte_array();
 
     // t = H("TapTweak", internalPx || merkleRoot) mod n
@@ -60,7 +62,7 @@ pub fn compute_adjusted_sig(
     let prevouts = [request_output.clone()];
     let sighash = SighashCache::new(deposit_tx)
         .taproot_key_spend_signature_hash(0, &Prevouts::All(&prevouts), TapSighashType::Default)
-        .expect("sighash computation");
+        .map_err(BridgeError::Sighash)?;
 
     // e = H("BIP0340/challenge", rx || tweakedPx || sighash) mod n
     let tweaked_pk_bytes = request_spend_info.output_key().serialize();
@@ -79,5 +81,5 @@ pub fn compute_adjusted_sig(
         s.add_mod(n - et, n)
     };
 
-    (s_prime.to_be_bytes::<32>(), odd_y)
+    Ok((s_prime.to_be_bytes::<32>(), odd_y))
 }

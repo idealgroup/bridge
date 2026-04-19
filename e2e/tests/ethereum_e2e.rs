@@ -121,7 +121,8 @@ async fn setup() -> TestFixture {
         &deposit_tx,
         &request_tx.output[0],
         &request_spend_info,
-    );
+    )
+    .unwrap();
     let sig_s = B256::from_slice(&sig_s_bytes);
 
     // 9. Start anvil and deploy the minting contract.
