@@ -35,7 +35,7 @@ fn test_happy_path_deposit_and_withdraw() {
     let network = fresh_network();
 
     // === Create actors (each independent) ===
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
     let committee = Committee::new(&mut rng, &secp);
     let operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
 
@@ -143,7 +143,7 @@ fn test_withdraw_operator_can_modify_payment_output() {
     let network = fresh_network();
 
     // === Create actors ===
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
     let committee = Committee::new(&mut rng, &secp);
     let operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
 
@@ -290,7 +290,7 @@ fn test_cancel_escape_hatch() {
     let network = fresh_network();
 
     // === Create actors ===
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
     let committee = Committee::new(&mut rng, &secp);
 
     // === Fund depositor ===
@@ -339,7 +339,7 @@ fn test_fraud_proof_disprove() {
     let network = fresh_network();
 
     // === Create actors ===
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
     let committee = Committee::new(&mut rng, &secp);
     let operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
 

@@ -110,6 +110,7 @@ mod tests {
             &secp,
             0,
             OutPoint::new(Txid::all_zeros(), 0),
+            [0xaa; 20],
         );
         let committee = Committee::new(&mut rng, &secp);
 
@@ -128,7 +129,7 @@ mod tests {
         let params = Params::test_defaults();
 
         use bridge::test_support::BITCOIN_NETWORK;
-        let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
+        let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0), [0xaa; 20]);
         depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 

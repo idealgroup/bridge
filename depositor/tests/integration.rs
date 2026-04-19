@@ -15,7 +15,7 @@ fn test_depositor_creates_request() {
     let params = Params::test_defaults();
     let mut rng = test_rng_seeded(77);
 
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
     let committee = Committee::new(&mut rng, &secp);
 
     let request_utxo =
@@ -43,7 +43,7 @@ fn test_depositor_cancel_after_timeout() {
     let params = Params::test_defaults();
     let mut rng = test_rng_seeded(77);
 
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
     let committee = Committee::new(&mut rng, &secp);
 
     let request_utxo =
@@ -85,7 +85,7 @@ fn test_depositor_cancel_before_timeout_rejected() {
     let params = Params::test_defaults();
     let mut rng = test_rng_seeded(77);
 
-    let mut depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+    let mut depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
     let committee = Committee::new(&mut rng, &secp);
 
     depositor.request_utxo =

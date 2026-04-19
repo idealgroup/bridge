@@ -62,10 +62,11 @@ async fn setup() -> TestFixture {
     let secp = Secp256k1::new();
     let params = Params::test_defaults();
     let mut rng = test_rng_seeded(0xdeadbeef);
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+    let eth_address: [u8; 20] = [0xab; 20];
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), eth_address);
     let committee = Committee::new(&mut rng, &secp);
 
-    let recipient = helpers::bytes_to_address(&depositor.eth_address);
+    let recipient = helpers::bytes_to_address(&eth_address);
 
     // 3. Fund depositor's request UTXO
     let request_utxo = network

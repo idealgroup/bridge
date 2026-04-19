@@ -79,13 +79,12 @@ impl Depositor {
         secp: &Secp256k1<bitcoin::secp256k1::All>,
         index: usize,
         request_utxo: OutPoint,
+        eth_address: [u8; 20],
     ) -> Self {
         let keypair = random_keypair(rng, secp);
         let (pubkey, _) = keypair.x_only_public_key();
         let mut deposit_secret = [0u8; 32];
         rng.fill(&mut deposit_secret);
-        let mut eth_address = [0u8; 20];
-        rng.fill(&mut eth_address);
         Self {
             keypair,
             pubkey,
@@ -138,12 +137,12 @@ mod tests {
     fn test_depositor_secret_hash() {
         let secp = Secp256k1::new();
         let mut rng = test_rng();
-        let dep = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
+        let dep = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
         let hash = dep.deposit_secret_hash();
         assert_eq!(hash.len(), 32);
         // Deterministic
         let mut rng2 = test_rng();
-        let dep2 = Depositor::new(&mut rng2, &secp, 0, dummy_outpoint());
+        let dep2 = Depositor::new(&mut rng2, &secp, 0, dummy_outpoint(), [0xaa; 20]);
         assert_eq!(dep.deposit_secret_hash(), dep2.deposit_secret_hash());
     }
 
