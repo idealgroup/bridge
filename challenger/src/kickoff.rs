@@ -19,6 +19,15 @@ use bridge::BridgeError;
 const FANOUT_LEAF_PREFIX_LEN: usize = 1 + 32 + 1;
 const OPERATOR_PUBKEY_OFFSET: usize = 1;
 
+/// Serialized size (in bytes) of the per-bit verification block in a Lamport
+/// verification script. Layout: OP_SHA256 + OP_DUP + push32(hash0) + OP_EQUAL
+/// + OP_IF + OP_DROP + OP_ELSE + push32(hash1) + OP_EQUALVERIFY + OP_ENDIF.
+const SCRIPT_BYTES_PER_BIT: usize = 74;
+/// Byte offset of the bit=0 hash within a per-bit script block.
+const SCRIPT_HASH0_OFFSET: usize = 3;
+/// Byte offset of the bit=1 hash within a per-bit script block.
+const SCRIPT_HASH1_OFFSET: usize = 40;
+
 /// Data extracted from a kickoff transaction's witnesses.
 pub struct KickoffData {
     pub operator_pubkey: XOnlyPublicKey,
@@ -105,15 +114,15 @@ pub fn extract_proof_from_kickoff(
         // crate's SCRIPT_* constants for the per-bit byte layout.
         for bit_idx in 0..num_bits {
             let global_bit = start + bit_idx;
-            let base = FANOUT_LEAF_PREFIX_LEN + bit_idx * lamport::SCRIPT_BYTES_PER_BIT;
-            if base + lamport::SCRIPT_BYTES_PER_BIT > leaf_script.len() {
+            let base = FANOUT_LEAF_PREFIX_LEN + bit_idx * SCRIPT_BYTES_PER_BIT;
+            if base + SCRIPT_BYTES_PER_BIT > leaf_script.len() {
                 return Err(BridgeError::WitnessParse(format!(
                     "leaf script too short for bit {}",
                     global_bit
                 )));
             }
-            let hash0_start = base + lamport::SCRIPT_HASH0_OFFSET;
-            let hash1_start = base + lamport::SCRIPT_HASH1_OFFSET;
+            let hash0_start = base + SCRIPT_HASH0_OFFSET;
+            let hash1_start = base + SCRIPT_HASH1_OFFSET;
             full_pk.0[global_bit][0]
                 .copy_from_slice(&leaf_script[hash0_start..hash0_start + lamport::HASH_LEN]);
             full_pk.0[global_bit][1]
