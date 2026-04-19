@@ -16,14 +16,17 @@ use bridge::BridgeError;
 pub struct DepositorClient {
     pub depositor: Depositor,
     pub params: Params,
+    /// 20-byte Ethereum address where wBTC will be minted (embedded in requestTx OP_RETURN).
+    pub eth_address: [u8; 20],
     secp: Secp256k1<All>,
 }
 
 impl DepositorClient {
-    pub fn new(depositor: Depositor, params: Params) -> Self {
+    pub fn new(depositor: Depositor, params: Params, eth_address: [u8; 20]) -> Self {
         Self {
             depositor,
             params,
+            eth_address,
             secp: Secp256k1::new(),
         }
     }
@@ -41,6 +44,7 @@ impl DepositorClient {
             &self.depositor,
             committee_pubkey,
             &self.params,
+            &self.eth_address,
         )?;
         let prevout = TxOut {
             value: self.params.request_input_value(),

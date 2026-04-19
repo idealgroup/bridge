@@ -63,7 +63,7 @@ async fn setup() -> TestFixture {
     let params = Params::test_defaults();
     let mut rng = test_rng_seeded(0xdeadbeef);
     let eth_address: [u8; 20] = [0xab; 20];
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), eth_address);
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
     let committee = Committee::new(&mut rng, &secp);
 
     let recipient = helpers::bytes_to_address(&eth_address);
@@ -74,7 +74,7 @@ async fn setup() -> TestFixture {
         .unwrap();
 
     // 4. Build+sign the requestTx
-    let mut dep_client = DepositorClient::new(depositor, params.clone());
+    let mut dep_client = DepositorClient::new(depositor, params.clone(), eth_address);
     let request_tx = dep_client
         .create_request(committee.pubkey, request_utxo)
         .unwrap();

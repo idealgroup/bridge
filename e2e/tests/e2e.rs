@@ -35,7 +35,7 @@ fn test_happy_path_deposit_and_withdraw() {
     let network = fresh_network();
 
     // === Create actors (each independent) ===
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
     let committee = Committee::new(&mut rng, &secp);
     let operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
 
@@ -46,7 +46,7 @@ fn test_happy_path_deposit_and_withdraw() {
         network.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
     // === Wrap in client APIs ===
-    let mut dep_client = DepositorClient::new(depositor, params.clone());
+    let mut dep_client = DepositorClient::new(depositor, params.clone(), [0xaa; 20]);
     let committee_client = CommitteeClient::new(committee, params.clone());
     let mut op_operator = operator;
     op_operator.init_utxo = operator_init_utxo;
@@ -143,7 +143,7 @@ fn test_withdraw_operator_can_modify_payment_output() {
     let network = fresh_network();
 
     // === Create actors ===
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
     let committee = Committee::new(&mut rng, &secp);
     let operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
 
@@ -154,7 +154,7 @@ fn test_withdraw_operator_can_modify_payment_output() {
         network.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
     // === Wrap in client APIs ===
-    let mut dep_client = DepositorClient::new(depositor, params.clone());
+    let mut dep_client = DepositorClient::new(depositor, params.clone(), [0xaa; 20]);
     let committee_client = CommitteeClient::new(committee, params.clone());
     let mut op_operator = operator;
     op_operator.init_utxo = operator_init_utxo;
@@ -290,14 +290,14 @@ fn test_cancel_escape_hatch() {
     let network = fresh_network();
 
     // === Create actors ===
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
     let committee = Committee::new(&mut rng, &secp);
 
     // === Fund depositor ===
     let request_utxo =
         network.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
 
-    let mut dep_client = DepositorClient::new(depositor, params.clone());
+    let mut dep_client = DepositorClient::new(depositor, params.clone(), [0xaa; 20]);
 
     // === 1. Depositor creates request ===
     let request_tx = dep_client
@@ -339,7 +339,7 @@ fn test_fraud_proof_disprove() {
     let network = fresh_network();
 
     // === Create actors ===
-    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
+    let depositor = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
     let committee = Committee::new(&mut rng, &secp);
     let operator = Operator::new(&mut rng, &secp, dummy_outpoint(), params.deposit_count);
 
@@ -350,7 +350,7 @@ fn test_fraud_proof_disprove() {
         network.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
 
     // === Wrap in client APIs ===
-    let mut dep_client = DepositorClient::new(depositor, params.clone());
+    let mut dep_client = DepositorClient::new(depositor, params.clone(), [0xaa; 20]);
     let committee_client = CommitteeClient::new(committee, params.clone());
     let mut op_operator = operator;
     op_operator.init_utxo = operator_init_utxo;

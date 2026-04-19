@@ -19,8 +19,6 @@ pub struct Depositor {
     pub index: usize,
     pub request_utxo: OutPoint,
     pub deposit_secret: [u8; 32],
-    /// 20-byte Ethereum address where wBTC will be minted (embedded in requestTx OP_RETURN).
-    pub eth_address: [u8; 20],
 }
 
 pub struct Committee {
@@ -79,7 +77,6 @@ impl Depositor {
         secp: &Secp256k1<bitcoin::secp256k1::All>,
         index: usize,
         request_utxo: OutPoint,
-        eth_address: [u8; 20],
     ) -> Self {
         let keypair = random_keypair(rng, secp);
         let (pubkey, _) = keypair.x_only_public_key();
@@ -91,7 +88,6 @@ impl Depositor {
             index,
             request_utxo,
             deposit_secret,
-            eth_address,
         }
     }
 
@@ -137,12 +133,12 @@ mod tests {
     fn test_depositor_secret_hash() {
         let secp = Secp256k1::new();
         let mut rng = test_rng();
-        let dep = Depositor::new(&mut rng, &secp, 0, dummy_outpoint(), [0xaa; 20]);
+        let dep = Depositor::new(&mut rng, &secp, 0, dummy_outpoint());
         let hash = dep.deposit_secret_hash();
         assert_eq!(hash.len(), 32);
         // Deterministic
         let mut rng2 = test_rng();
-        let dep2 = Depositor::new(&mut rng2, &secp, 0, dummy_outpoint(), [0xaa; 20]);
+        let dep2 = Depositor::new(&mut rng2, &secp, 0, dummy_outpoint());
         assert_eq!(dep.deposit_secret_hash(), dep2.deposit_secret_hash());
     }
 

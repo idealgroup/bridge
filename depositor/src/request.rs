@@ -30,6 +30,7 @@ pub fn build_request_tx(
     depositor: &Depositor,
     committee_pubkey: XOnlyPublicKey,
     params: &Params,
+    eth_address: &[u8; 20],
 ) -> Result<Transaction, BridgeError> {
     let spend_info = scripts::request_spend_info(
         secp,
@@ -44,7 +45,7 @@ pub fn build_request_tx(
     // OP_RETURN output with 20-byte Ethereum address
     let op_return_script = Builder::new()
         .push_opcode(OP_RETURN)
-        .push_slice(depositor.eth_address)
+        .push_slice(eth_address)
         .into_script();
 
     Ok(Transaction {
@@ -110,11 +111,10 @@ mod tests {
             &secp,
             0,
             OutPoint::new(Txid::all_zeros(), 0),
-            [0xaa; 20],
         );
         let committee = Committee::new(&mut rng, &secp);
 
-        let tx = build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
+        let tx = build_request_tx(&secp, &depositor, committee.pubkey, &params, &[0xaa; 20]).unwrap();
         assert_eq!(tx.input.len(), 1);
         assert_eq!(tx.output.len(), 2);
         assert_eq!(tx.output[0].value, params.request_input_value());
@@ -129,11 +129,11 @@ mod tests {
         let params = Params::test_defaults();
 
         use bridge::test_support::BITCOIN_NETWORK;
-        let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0), [0xaa; 20]);
+        let mut depositor = Depositor::new(&mut rng, &secp, 0, OutPoint::new(Txid::all_zeros(), 0));
         depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let mut tx = build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
+        let mut tx = build_request_tx(&secp, &depositor, committee.pubkey, &params, &[0xaa; 20]).unwrap();
         let prevouts = [TxOut {
             value: params.request_input_value(),
             script_pubkey: ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),
