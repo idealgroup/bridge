@@ -5,6 +5,9 @@ use bridge::engine::Proof;
 use bridge::params::Params;
 use bridge::BridgeError;
 
+/// Script layout constants used to parse kickoff tx witnesses from on-chain
+/// and recover the Lamport signatures (operator pubkey + proof preimages).
+///
 /// Byte layout of the fanout leaf script prefix (before the Lamport verification block):
 ///
 /// ```text
@@ -15,9 +18,9 @@ use bridge::BridgeError;
 /// ```
 ///
 /// See `bridge::scripts::fanout_leaf_script`. The Lamport verification block starts
-/// immediately after at offset [`FANOUT_LEAF_PREFIX_LEN`].
-const FANOUT_LEAF_PREFIX_LEN: usize = 1 + 32 + 1;
-const OPERATOR_PUBKEY_OFFSET: usize = 1;
+/// immediately after at offset [`SCRIPT_FANOUT_LEAF_PREFIX_LEN`].
+const SCRIPT_FANOUT_LEAF_PREFIX_LEN: usize = 1 + 32 + 1;
+const SCRIPT_OPERATOR_PUBKEY_OFFSET: usize = 1;
 
 /// Serialized size (in bytes) of the per-bit verification block in a Lamport
 /// verification script. Layout: OP_SHA256 + OP_DUP + push32(hash0) + OP_EQUAL
@@ -82,8 +85,8 @@ pub fn extract_proof_from_kickoff(
 
         let leaf_script = witness[wit_len - 2].to_vec();
 
-        // Extract operator pubkey from leaf script prefix (see FANOUT_LEAF_PREFIX_LEN).
-        if leaf_script.len() < FANOUT_LEAF_PREFIX_LEN {
+        // Extract operator pubkey from leaf script prefix (see SCRIPT_FANOUT_LEAF_PREFIX_LEN).
+        if leaf_script.len() < SCRIPT_FANOUT_LEAF_PREFIX_LEN {
             return Err(BridgeError::WitnessParse(
                 "leaf script too short for operator pubkey".into(),
             ));
@@ -95,7 +98,7 @@ pub fn extract_proof_from_kickoff(
             )));
         }
         let chunk_op_pk = XOnlyPublicKey::from_slice(
-            &leaf_script[OPERATOR_PUBKEY_OFFSET..OPERATOR_PUBKEY_OFFSET + 32],
+            &leaf_script[SCRIPT_OPERATOR_PUBKEY_OFFSET..SCRIPT_OPERATOR_PUBKEY_OFFSET + 32],
         )
         .map_err(|e| BridgeError::WitnessParse(format!("operator pubkey: {e}")))?;
         match operator_pubkey {
@@ -114,7 +117,7 @@ pub fn extract_proof_from_kickoff(
         // crate's SCRIPT_* constants for the per-bit byte layout.
         for bit_idx in 0..num_bits {
             let global_bit = start + bit_idx;
-            let base = FANOUT_LEAF_PREFIX_LEN + bit_idx * SCRIPT_BYTES_PER_BIT;
+            let base = SCRIPT_FANOUT_LEAF_PREFIX_LEN + bit_idx * SCRIPT_BYTES_PER_BIT;
             if base + SCRIPT_BYTES_PER_BIT > leaf_script.len() {
                 return Err(BridgeError::WitnessParse(format!(
                     "leaf script too short for bit {}",

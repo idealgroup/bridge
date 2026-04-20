@@ -6,11 +6,10 @@ use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
 use bitcoin::opcodes::all::OP_RETURN;
 use bitcoin::script::Builder;
-use bitcoin::{Amount, ScriptBuf, Witness};
+use bitcoin::{Amount, OutPoint, ScriptBuf, Witness};
 
 use bitcoin::key::UntweakedPublicKey as XOnlyPublicKey;
 
-use bridge::actor::Depositor;
 use bridge::params::Params;
 use bridge::scripts;
 use bridge::BridgeError;
@@ -27,7 +26,9 @@ use bridge::BridgeError;
 /// pay the relay fee — see `Params::request_input_value` for details.
 pub fn build_request_tx(
     secp: &Secp256k1<bitcoin::secp256k1::All>,
-    depositor: &Depositor,
+    depositor_pubkey: XOnlyPublicKey,
+    deposit_secret_hash: [u8; 32],
+    request_utxo: OutPoint,
     committee_pubkey: XOnlyPublicKey,
     params: &Params,
     eth_address: &[u8; 20],
@@ -35,8 +36,8 @@ pub fn build_request_tx(
     let spend_info = scripts::request_spend_info(
         secp,
         committee_pubkey,
-        depositor.pubkey,
-        depositor.deposit_secret_hash(),
+        depositor_pubkey,
+        deposit_secret_hash,
         params.deposit_timeout,
     )?;
 
@@ -52,7 +53,7 @@ pub fn build_request_tx(
         version: Version::TWO,
         lock_time: LockTime::ZERO,
         input: vec![TxIn {
-            previous_output: depositor.request_utxo,
+            previous_output: request_utxo,
             script_sig: ScriptBuf::new(),
             sequence: bitcoin::Sequence::ENABLE_RBF_NO_LOCKTIME,
             witness: Witness::new(),
@@ -96,7 +97,7 @@ mod tests {
     use super::*;
     use bridge::actor::{Committee, Depositor};
     use bridge::params::Params;
-    use bitcoin::{Amount, OutPoint, Txid};
+    use bitcoin::{Amount, Txid};
     use bitcoin::hashes::Hash;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -114,7 +115,7 @@ mod tests {
         );
         let committee = Committee::new(&mut rng, &secp);
 
-        let tx = build_request_tx(&secp, &depositor, committee.pubkey, &params, &[0xaa; 20]).unwrap();
+        let tx = build_request_tx(&secp, depositor.pubkey, depositor.deposit_secret_hash(), depositor.request_utxo, committee.pubkey, &params, &[0xaa; 20]).unwrap();
         assert_eq!(tx.input.len(), 1);
         assert_eq!(tx.output.len(), 2);
         assert_eq!(tx.output[0].value, params.request_input_value());
@@ -133,7 +134,7 @@ mod tests {
         depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let mut tx = build_request_tx(&secp, &depositor, committee.pubkey, &params, &[0xaa; 20]).unwrap();
+        let mut tx = build_request_tx(&secp, depositor.pubkey, depositor.deposit_secret_hash(), depositor.request_utxo, committee.pubkey, &params, &[0xaa; 20]).unwrap();
         let prevouts = [TxOut {
             value: params.request_input_value(),
             script_pubkey: ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),

@@ -41,7 +41,9 @@ impl DepositorClient {
         self.depositor.request_utxo = request_utxo;
         let mut tx = request::build_request_tx(
             &self.secp,
-            &self.depositor,
+            self.depositor.pubkey,
+            self.depositor.deposit_secret_hash(),
+            request_utxo,
             committee_pubkey,
             &self.params,
             &self.eth_address,

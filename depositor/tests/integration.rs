@@ -92,7 +92,7 @@ fn test_depositor_cancel_before_timeout_rejected() {
         BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
 
     let mut request_tx =
-        request::build_request_tx(&secp, &depositor, committee.pubkey, &params, &[0xaa; 20]).unwrap();
+        request::build_request_tx(&secp, depositor.pubkey, depositor.deposit_secret_hash(), depositor.request_utxo, committee.pubkey, &params, &[0xaa; 20]).unwrap();
     let depositor_prevout = TxOut {
         value: params.request_input_value(),
         script_pubkey: bitcoin::ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),

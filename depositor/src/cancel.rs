@@ -126,7 +126,7 @@ mod tests {
         let committee = Committee::new(&mut rng, &secp);
 
         // Build and sign request_tx (parent)
-        let mut request_tx = crate::request::build_request_tx(&secp, &depositor, committee.pubkey, &params, &[0xaa; 20]).unwrap();
+        let mut request_tx = crate::request::build_request_tx(&secp, depositor.pubkey, depositor.deposit_secret_hash(), depositor.request_utxo, committee.pubkey, &params, &[0xaa; 20]).unwrap();
         let depositor_prevout = TxOut {
             value: params.request_input_value(),
             script_pubkey: ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),
@@ -176,7 +176,7 @@ mod tests {
         depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let mut request_tx = crate::request::build_request_tx(&secp, &depositor, committee.pubkey, &params, &[0xaa; 20]).unwrap();
+        let mut request_tx = crate::request::build_request_tx(&secp, depositor.pubkey, depositor.deposit_secret_hash(), depositor.request_utxo, committee.pubkey, &params, &[0xaa; 20]).unwrap();
         let depositor_prevout = TxOut {
             value: params.request_input_value(),
             script_pubkey: ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),
@@ -219,7 +219,7 @@ mod tests {
         depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let mut request_tx = crate::request::build_request_tx(&secp, &depositor, committee.pubkey, &params, &[0xaa; 20]).unwrap();
+        let mut request_tx = crate::request::build_request_tx(&secp, depositor.pubkey, depositor.deposit_secret_hash(), depositor.request_utxo, committee.pubkey, &params, &[0xaa; 20]).unwrap();
         let depositor_prevout = TxOut {
             value: params.request_input_value(),
             script_pubkey: ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),
