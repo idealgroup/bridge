@@ -6,8 +6,9 @@ import {MintingContract} from "../src/MintingContract.sol";
 import {BIP340} from "../src/BIP340.sol";
 import {TxParser} from "../src/TxParser.sol";
 
-/// Thin harness so we can call the internal `TxParser.parseRequestTx` from tests
-/// via an external call, which lets `vm.expectRevert` observe the revert.
+/// Wraps the internal `TxParser.parseRequestTx` as an external call.
+/// Needed because Forge's `vm.expectRevert` only catches reverts from external
+/// calls — internal library calls revert the test itself.
 contract TxParserHarness {
     function parse(bytes calldata raw) external pure {
         TxParser.parseRequestTx(raw);
@@ -20,12 +21,13 @@ contract MintingContractTest is Test {
     bytes32 constant DUMMY_INTERNAL_PK = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798;
     // Dummy deposit tweaked pubkey (different valid point).
     bytes32 constant DUMMY_TWEAKED_PK = 0xC6047F9441ED7D6D3045406E95C07CD85C778E4B8CEF3CA7ABAC09B95C709EE5;
+    uint64 constant DEPOSIT_SIZE = 1_0000_0000; // 1 BTC in sats
     uint64 constant MINT_DELAY = 86400;
 
     MintingContract minting;
 
     function setUp() public {
-        minting = new MintingContract(DUMMY_INTERNAL_PK, DUMMY_TWEAKED_PK, MINT_DELAY);
+        minting = new MintingContract(DUMMY_INTERNAL_PK, DUMMY_TWEAKED_PK, DEPOSIT_SIZE, MINT_DELAY);
     }
 
     function testDeploy() public view {

@@ -91,16 +91,17 @@ impl AnvilNode {
             .connect_http(self.url.parse().unwrap())
     }
 
-    /// Deploy a fresh `MintingContract` with the given committee keys and mint delay.
+    /// Deploy a fresh `MintingContract` with the given committee keys, deposit size, and mint delay.
     /// `mint_delay` is in seconds (the contract uses `block.timestamp`).
     pub async fn deploy_minting_contract(
         &self,
         committee_internal_pk: B256,
         deposit_tweaked_pk: B256,
+        deposit_size: u64,
         mint_delay: u64,
     ) -> Address {
         let provider = self.provider();
-        let instance = MintingContract::deploy(&provider, committee_internal_pk, deposit_tweaked_pk, mint_delay)
+        let instance = MintingContract::deploy(&provider, committee_internal_pk, deposit_tweaked_pk, deposit_size, mint_delay)
             .await
             .expect("deploy failed");
         *instance.address()

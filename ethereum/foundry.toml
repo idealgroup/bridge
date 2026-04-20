@@ -14,6 +14,13 @@ remappings = [
 
 fs_permissions = [{ access = "read", path = "./test/fixtures" }]
 
+# Foundry built-in linter configuration.
 [lint]
-# Intentional lossy casts in LE encoding; style lints on internal variable names.
-exclude_lints = ["unsafe-typecast", "mixed-case-variable", "screaming-snake-case-immutable"]
+exclude_lints = [
+  # TxParser uses uint8(bytes1(...)) casts for little-endian byte decoding — intentionally lossy.
+  "unsafe-typecast",
+  # BIP340/BIP341 internal variables (e.g., pxU, rxU) follow crypto notation, not Solidity style.
+  "mixed-case-variable",
+  # Immutables like committeeInternalPubkey use camelCase to match Solidity convention, not SCREAMING_SNAKE.
+  "screaming-snake-case-immutable",
+]

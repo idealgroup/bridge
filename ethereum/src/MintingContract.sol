@@ -15,6 +15,10 @@ contract MintingContract is ERC20 {
     // P2TR dust threshold (sats) — mirrors DUST_AMOUNT on the Bitcoin side.
     uint64 public constant DUST_AMOUNT = 330;
 
+    /// @notice Fixed deposit size in satoshis — mirrors Params::deposit_size on the Rust side.
+    ///         All deposits mint this amount; the committee only signs depositTxs with this value.
+    uint64 public immutable depositSize;
+
     // Taproot tx constants used to reconstruct the depositTx sighash.
     uint32 internal constant TX_VERSION = 2;
     uint32 internal constant LOCKTIME = 0;
@@ -59,14 +63,17 @@ contract MintingContract is ERC20 {
     /// @param _depositTweakedPubkey x-only P2TR output key for the committee's
     ///        depositTx output (BIP341 tap-tweaked committee pubkey, no script
     ///        tree). Computed off-chain by the deployer.
+    /// @param _depositSize Fixed deposit amount in satoshis (must match Rust Params::deposit_size).
     /// @param _mintDelay Number of seconds between `request` and `mint`.
     constructor(
         bytes32 _committeeInternalPubkey,
         bytes32 _depositTweakedPubkey,
+        uint64 _depositSize,
         uint64 _mintDelay
     ) ERC20("Wrapped BTC", "wBTC") {
         committeeInternalPubkey = _committeeInternalPubkey;
         depositTweakedPubkey = _depositTweakedPubkey;
+        depositSize = _depositSize;
         mintDelay = _mintDelay;
     }
 
@@ -99,13 +106,9 @@ contract MintingContract is ERC20 {
         // Parse the requestTx
         TxParser.RequestTxData memory tx_ = TxParser.parseRequestTx(rawRequestTx);
 
-        // Check this deposit hasn't been requested before
+        // Each depositSecretHash can only be used once. If a depositor reuses the
+        // same secret without cancelling, this reverts.
         require(deposits[depositSecretHash].status == DepositStatus.None, "deposit already requested");
-
-        // Derive deposit output amount from request output (ground truth):
-        // deposit_output_amount = request_output0_amount - DUST_AMOUNT
-        require(tx_.output0Amount > DUST_AMOUNT, "request output too small");
-        uint64 depositOutputAmount = tx_.output0Amount - DUST_AMOUNT;
 
         // Extract the tweaked pubkey from the requestTx output 0 (P2TR).
         // This is the committee's internal key taptweak'd with the cancel
@@ -128,7 +131,7 @@ contract MintingContract is ERC20 {
             tx_.output0Amount,
             spk,
             SEQUENCE_RBF,
-            depositOutputAmount,
+            depositSize,
             depositScriptPubkey(),
             0x00, // spend_type: key-path
             0     // input_index
@@ -141,15 +144,12 @@ contract MintingContract is ERC20 {
             "invalid committee signature"
         );
 
-        // Store deposit info. `amount` is the value actually locked in the
-        // committee's depositTx output (request output minus DUST_AMOUNT),
-        // not the requestTx output itself — that's what backs the minted wBTC.
         deposits[depositSecretHash] = DepositInfo({
             recipient: tx_.recipient,
             depositSecretHash: depositSecretHash,
             requestTimestamp: uint64(block.timestamp),
             status: DepositStatus.Pending,
-            amount: depositOutputAmount
+            amount: depositSize
         });
 
         emit Request(depositSecretHash, tx_.recipient, uint64(block.timestamp));

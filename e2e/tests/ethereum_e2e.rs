@@ -130,7 +130,7 @@ async fn setup() -> TestFixture {
     let committee_internal_pk = B256::from_slice(&committee_client.committee.pubkey.serialize());
     let anvil = AnvilNode::start().await;
     let contract_address = anvil
-        .deploy_minting_contract(committee_internal_pk, deposit_tweaked_pk, 86400)
+        .deploy_minting_contract(committee_internal_pk, deposit_tweaked_pk, params.deposit_size.to_sat(), 86400)
         .await;
 
     let deposit_secret = B256::from_slice(&dep_client.depositor.deposit_secret);
