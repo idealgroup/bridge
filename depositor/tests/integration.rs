@@ -2,10 +2,9 @@ use bitcoin::secp256k1::Secp256k1;
 use bitcoin::transaction::TxOut;
 
 use bridge::actor::{Committee, Depositor};
-use bridge::network::BITCOIN_NETWORK;
 use bridge::params::Params;
 use bridge::scripts;
-use bridge::test_support::{test_rng_seeded, dummy_outpoint};
+use bridge::test_support::{test_rng_seeded, dummy_outpoint, BITCOIN_NETWORK};
 
 use depositor::DepositorClient;
 
@@ -22,14 +21,15 @@ fn test_depositor_creates_request() {
     let request_utxo =
         BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
 
-    let mut client = DepositorClient::new(depositor, params.clone());
+    let mut client = DepositorClient::new(depositor, params.clone(), [0xaa; 20]);
 
     let request_tx = client
         .create_request(committee.pubkey, request_utxo)
         .unwrap();
 
-    assert_eq!(request_tx.output.len(), 1);
+    assert_eq!(request_tx.output.len(), 2);
     assert_eq!(request_tx.output[0].value, params.request_input_value());
+    assert!(request_tx.output[1].script_pubkey.is_op_return());
 
     BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
     BITCOIN_NETWORK.mine_blocks(1).unwrap();
@@ -49,7 +49,7 @@ fn test_depositor_cancel_after_timeout() {
     let request_utxo =
         BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
 
-    let mut client = DepositorClient::new(depositor, params.clone());
+    let mut client = DepositorClient::new(depositor, params.clone(), [0xaa; 20]);
 
     let request_tx = client
         .create_request(committee.pubkey, request_utxo)
@@ -92,11 +92,10 @@ fn test_depositor_cancel_before_timeout_rejected() {
         BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
 
     let mut request_tx =
-        request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
+        request::build_request_tx(&secp, depositor.pubkey, depositor.deposit_secret_hash(), depositor.request_utxo, committee.pubkey, &params, &[0xaa; 20]).unwrap();
     let depositor_prevout = TxOut {
         value: params.request_input_value(),
-        script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
-            .script_pubkey(),
+        script_pubkey: bitcoin::ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),
     };
     request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout])
         .unwrap();

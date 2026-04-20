@@ -1,0 +1,26 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+solc = "0.8.24"
+via_ir = true
+optimizer = true
+optimizer_runs = 200
+remappings = [
+  "@openzeppelin/=lib/openzeppelin-contracts/",
+  "forge-std/=lib/forge-std/src/",
+]
+
+fs_permissions = [{ access = "read", path = "./test/fixtures" }]
+
+# Foundry built-in linter configuration.
+[lint]
+exclude_lints = [
+  # TxParser uses uint8(bytes1(...)) casts for little-endian byte decoding — intentionally lossy.
+  "unsafe-typecast",
+  # BIP340/BIP341 internal variables (e.g., pxU, rxU) follow crypto notation, not Solidity style.
+  "mixed-case-variable",
+  # Immutables like committeeInternalPubkey use camelCase to match Solidity convention, not SCREAMING_SNAKE.
+  "screaming-snake-case-immutable",
+]

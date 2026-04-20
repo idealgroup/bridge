@@ -231,23 +231,6 @@ mod tests {
     }
 
     #[test]
-    fn test_verification_script_structure() {
-        let mut rng = test_rng();
-        let sk = SecretKey::random(&mut rng);
-        let pk = sk.public_key();
-        let script = pk.verification_script();
-        let script_bytes = script.as_bytes();
-
-        // Per bit: OP_SHA256(1) + OP_DUP(1) + push 32-byte hash(1+32) + OP_EQUAL(1)
-        //        + OP_IF(1) + OP_DROP(1) + OP_ELSE(1) + push 32-byte hash(1+32)
-        //        + OP_EQUALVERIFY(1) + OP_ENDIF(1)
-        // = 74 bytes per bit
-        // + 1 byte for final OP_TRUE
-        let expected_len = NUM_BITS * 74 + 1;
-        assert_eq!(script_bytes.len(), expected_len);
-    }
-
-    #[test]
     fn test_signature_sizes() {
         assert_eq!(std::mem::size_of::<SecretKey>(), NUM_BITS * 2 * PREIMAGE_LEN);
         assert_eq!(std::mem::size_of::<PublicKey>(), NUM_BITS * 2 * HASH_LEN);

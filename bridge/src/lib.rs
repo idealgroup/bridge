@@ -6,6 +6,9 @@ pub mod regtest;
 pub mod scripts;
 pub mod test_support;
 
+use bitcoin::consensus;
+use bitcoin::transaction::Transaction;
+
 use std::fmt;
 
 #[derive(Debug)]
@@ -42,3 +45,13 @@ impl fmt::Display for BridgeError {
 }
 
 impl std::error::Error for BridgeError {}
+
+/// Serialize a Bitcoin transaction in non-witness (legacy) format.
+/// Used to compute the txid (double-SHA256) and for Solidity `TxParser` input.
+pub fn serialize_tx_no_witness(tx: &Transaction) -> Vec<u8> {
+    let mut tx_clone = tx.clone();
+    for input in &mut tx_clone.input {
+        input.witness = bitcoin::Witness::new();
+    }
+    consensus::serialize(&tx_clone)
+}

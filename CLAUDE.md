@@ -1,6 +1,6 @@
 # ideal-bridge
 
-A Rust implementation of a BitVM3 bridge between Bitcoin and Ethereum.
+A Rust + Solidity implementation of a BitVM3 bridge between Bitcoin and Ethereum.
 Designed as a clean, testable library that can be integrated into a CLI/server by another team.
 
 ## Protocol Overview
@@ -9,9 +9,9 @@ The bridge enables BTC <-> wBTC (on Ethereum) transfers using an optimistic prot
 with one-round fraud proofs via garbled circuits.
 
 ### Deposit Flow (BTC -> wBTC)
-1. Depositor locks 1 BTC in `requestTx` — spendable by the committee OR by the depositor after timeout (revealing `depositSecret`)
+1. Depositor locks BTC in `requestTx` (output 0: P2TR deposit, output 1: OP_RETURN with Ethereum address) — spendable by the committee OR by the depositor after timeout (revealing `depositSecret`)
 2. Committee presigns `depositTx`, moving the BTC under committee control
-3. On Ethereum, wBTC is minted after Bitcoin finality
+3. On Ethereum, wBTC is minted after Bitcoin finality (via the `MintingContract`)
 4. If anything goes wrong, depositor can reclaim via `cancelTx` (reveals `depositSecret`, which also cancels the L2 mint)
 
 ### Withdrawal Flow (wBTC -> BTC)
@@ -70,11 +70,12 @@ All `SIGHASH_ALL` except `withdrawTx` input 0 which uses `SIGHASH_SINGLE` — th
 | Lamport chunking | 3 UTXOs per deposit slot | Tapscript stack limit is 1000 items; per-bit verification peaks at N+2 (OP_DUP + pubkey push), so max 998 bits per script. 2048 bits / 998 = 3 chunks. The `lamport` crate exposes `verification_script_for_range` / `witness_data_for_range`; `operator/` wires chunks to fanout outputs and kickoff inputs. |
 | Lamport over Winternitz | Lamport | 1:1 mapping to garbled circuit wire labels |
 | BitVM engine | Trait (black box) | GC/SNARK verification out of scope; mock in tests |
-| Ethereum interaction | Typed events | No Ethereum deps; clean integration boundary |
+| Ethereum contract | Solidity 0.8.24 (Foundry) | `ethereum/` — `MintingContract`: ERC20 wBTC, verifies BIP340 sig + BIP341 sighash on-chain, mint/cancel/burn. BIP340 uses the ecrecover trick for secp256k1 scalar ops. Built with `forge build`, tested with `forge test`. |
 | Committee signing | Direct signing functions | `committee/deposit.rs` and `committee/withdraw.rs`; MuSig2 aggregation deferred to CLI/server layer |
 | Script execution | `BitcoinNetwork` enum | All verification through live bitcoind (`Regtest` mode). Chain monitoring via `broadcast_tx`, `get_raw_transaction`, `get_block_at_height`, `get_chain_tip`, `poll_new_blocks`. |
 | Anchor outputs | Operator-keyed P2TR anchor on `kickoffTx` only | `kickoffTx` anchor is operator-keyed (prevents replacement cycling). `depositTx` has no anchor (fee set at presign time). `withdrawTx` uses `SIGHASH_SINGLE` on input 0 with OP_RETURN at output 0 (operator sets fee via additional outputs) |
-| Dust outputs | `DUST_AMOUNT` = 546 sats | For non-value-bearing outputs (fanout, connector, disprove) |
+| `withdrawTx` OP_RETURN dummy | `SIGHASH_SINGLE` + OP_RETURN output 0 | `SIGHASH_NONE` would be simpler but sets `nSequence` of all other inputs to 0, breaking the challenge-period timelock on the connector input. `SIGHASH_SINGLE` commits to exactly one output — we use a dummy OP_RETURN at index 0 so the committee can presign without knowing the operator's payment outputs. The operator adds payment/change outputs at broadcast time. |
+| Dust outputs | `DUST_AMOUNT` = 330 sats | P2TR dust threshold for non-value-bearing outputs (fanout, connector, disprove) |
 | Timelocks | Relative (`OP_CSV` + `nSequence`) | `cancelTx` uses `OP_CSV` in script; `withdrawTx` connector timelock enforced by `nSequence` committed in committee's presigned input0 |
 | Operator coordination | Out of scope | Economic incentive only; no explicit mechanism |
 | Actor isolation | Separate crates + clients | Each actor (Operator, Depositor, Committee, Challenger) has its own crate with tx build/sign logic and a Client struct. `bridge/` is a thin shared-types layer. No shared in-memory state between actors — each must own all data for its workflow or learn it from on-chain data. |
@@ -130,9 +131,25 @@ ideal-bridge/
 │   │   ├── kickoff.rs          # KickoffData + extract_proof_from_kickoff (witness parsing)
 │   │   ├── disprove.rs         # build_disprove_tx, witness_disprove_tx
 │   │   └── main.rs             # placeholder
+├── ethereum/                   # Solidity contracts (Foundry project, not in Cargo workspace)
+│   ├── foundry.toml            # solc 0.8.24, via_ir, optimizer_runs=200
+│   ├── remappings.txt          # @openzeppelin/, forge-std/
+│   ├── lib/
+│   │   ├── openzeppelin-contracts/
+│   │   └── forge-std/
+│   ├── src/
+│   │   ├── MintingContract.sol # ERC20 wBTC (8 decimals): request, mint, cancel, burn
+│   │   ├── BIP340.sol          # Schnorr verification via ecrecover trick
+│   │   ├── BIP341.sol          # taprootSighash (BIP341 key-spend SIGHASH_DEFAULT)
+│   │   └── TxParser.sol        # parseRequestTx: txid (double-sha256), output0 amount/scriptPubKey, OP_RETURN
+│   └── test/MintingContract.t.sol  # 5 forge tests (incl. BIP340 vector validation)
 ├── e2e/                        # end-to-end integration tests across all actor clients
 │   ├── Cargo.toml
-│   └── tests/e2e.rs            # 5 tests: happy path withdraw, cancel escape hatch, fraud proof disprove, ignore valid proof, extract proof from kickoff
+│   ├── tests/e2e.rs            # 6 Bitcoin-only tests: happy path withdraw, cancel escape hatch, fraud proof disprove, ignore valid proof, extract proof from kickoff, withdraw with modified payment output
+│   ├── tests/ethereum_e2e.rs   # 7 cross-chain Ethereum tests: happy path mint, cancel blocks mint, early mint rejected, invalid sig, duplicate request, burn after mint, cancel after mint
+│   └── tests/ethereum_e2e/
+│       ├── anvil.rs            # AnvilNode: anvil lifecycle, forge build, alloy provider, deploy MintingContract
+│       └── helpers.rs          # bitcoin tx → non-witness bytes, schnorr sig → (bytes32, bytes32)
 ```
 
 ### Transaction Ownership
@@ -155,7 +172,8 @@ Each actor crate owns the build/sign logic for the transactions it creates:
 1. `lamport` — keygen, sign, Bitcoin Script verification, unit tests
 2. `bridge` — shared types: `params`, `actor` (data-only), `engine`, `scripts`, `transactions/fanout` + `transactions/kickoff` (shared types only), `network` + `regtest`
 3. Actor crates (each depends on `bridge`): `committee`, `operator`, `depositor`, `challenger`
-4. `e2e` — end-to-end integration tests across all actor clients
+4. `ethereum/` — Solidity contract (independent Foundry project): `forge build` then `forge test`
+5. `e2e` — end-to-end integration tests (Bitcoin-only + cross-chain Ethereum)
 
 ## Parameters (defaults)
 
@@ -169,7 +187,7 @@ Each actor crate owns the build/sign logic for the transactions it creates:
 - `KICKOFF_TIMEOUT`: 3 days (relative, enforced by `nSequence`)
 - `DEPOSIT_TIMEOUT`: 1 hour (relative, `OP_CSV`)
 - `PROOF_SIZE`: 256 bytes (Groth16 / BN254)
-- `DUST_AMOUNT`: 546 sats
+- `DUST_AMOUNT`: 330 sats (P2TR dust threshold)
 
 ## Code Style
 
