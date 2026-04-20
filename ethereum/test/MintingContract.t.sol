@@ -62,10 +62,10 @@ contract MintingContractTest is Test {
         assertEq(minting.mintDelay(), MINT_DELAY);
     }
 
-    function testCancelWithWrongSecretNoMatch() public {
-        // Cancel with a secret whose hash doesn't match any pending deposit.
+    function testCancelNonexistentDeposit() public {
+        // Cancel with a txid that has no pending deposit.
         vm.expectRevert("not pending");
-        minting.cancel(bytes32(uint256(0xdeadbeef)));
+        minting.cancel(bytes32(uint256(0x1234)), bytes32(uint256(0xdeadbeef)));
     }
 
     function testMintNonexistentDeposit() public {

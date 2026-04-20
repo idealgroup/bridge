@@ -35,6 +35,9 @@ struct TestFixture {
     anvil: AnvilNode,
     contract_address: Address,
     raw_request_tx_bytes: Bytes,
+    /// requestTx txid as computed by TxParser.computeTxid (sha256d, natural byte order).
+    /// Used as the deposit mapping key in the contract.
+    request_txid: B256,
     deposit_secret: B256,
     deposit_secret_hash: B256,
     sig_rx: B256,
@@ -100,6 +103,15 @@ async fn setup() -> TestFixture {
     // 6. Serialize requestTx in non-witness format (for the contract parser).
     let raw_request_tx_bytes = dep_client.request_tx_no_witness(&request_tx);
 
+    // Compute the txid the same way TxParser.computeTxid does: sha256(sha256(raw)).
+    // This is sha256d in natural byte order (not reversed like bitcoin's display format).
+    use bitcoin::hashes::{sha256d, Hash as _};
+    let txid_hash = sha256d::Hash::hash(&raw_request_tx_bytes);
+    // sha256d::Hash stores bytes in display (reversed) order; reverse for natural order.
+    let mut txid_bytes = txid_hash.to_byte_array();
+    txid_bytes.reverse();
+    let request_txid_b256 = B256::from_slice(&txid_bytes);
+
     // 7. Compute the committee's tap-tweaked x-only pubkey (no script tree).
     //    This is the same key committee/deposit.rs uses for Address::p2tr with no merkle root.
     let untweaked: UntweakedPublicKey = committee_client.committee.pubkey;
@@ -141,6 +153,7 @@ async fn setup() -> TestFixture {
         anvil,
         contract_address,
         raw_request_tx_bytes: raw_request_tx_bytes.into(),
+        request_txid: request_txid_b256,
         deposit_secret,
         deposit_secret_hash,
         sig_rx,
@@ -175,7 +188,7 @@ async fn test_happy_path() {
     // Advance past the mint delay.
     f.anvil.increase_time(86401).await;
 
-    c.mint(f.deposit_secret_hash)
+    c.mint(f.request_txid)
         .send()
         .await
         .expect("mint failed")
@@ -206,7 +219,7 @@ async fn test_cancel_blocks_mint() {
     .await
     .unwrap();
 
-    c.cancel(f.deposit_secret)
+    c.cancel(f.request_txid, f.deposit_secret)
         .send()
         .await
         .expect("cancel failed")
@@ -215,7 +228,7 @@ async fn test_cancel_blocks_mint() {
         .unwrap();
 
     // Mint should revert ("not pending") now that the deposit has been cancelled.
-    let err = c.mint(f.deposit_secret_hash).send().await.err();
+    let err = c.mint(f.request_txid).send().await.err();
     let err_str = format!("{err:?}");
     assert!(
         err_str.contains("not pending"),
@@ -243,7 +256,7 @@ async fn test_early_mint_rejected() {
     .unwrap();
 
     // No time advance → mint must revert with "mint delay not elapsed".
-    let err = c.mint(f.deposit_secret_hash).send().await.err();
+    let err = c.mint(f.request_txid).send().await.err();
     let err_str = format!("{err:?}");
     assert!(
         err_str.contains("mint delay not elapsed"),
@@ -332,7 +345,7 @@ async fn test_burn_after_mint() {
 
     f.anvil.increase_time(86401).await;
 
-    c.mint(f.deposit_secret_hash)
+    c.mint(f.request_txid)
         .send()
         .await
         .expect("mint failed")
@@ -414,7 +427,7 @@ async fn test_cancel_after_mint() {
 
     f.anvil.increase_time(86401).await;
 
-    c.mint(f.deposit_secret_hash)
+    c.mint(f.request_txid)
         .send()
         .await
         .expect("mint failed")

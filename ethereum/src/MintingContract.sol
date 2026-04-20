@@ -52,11 +52,13 @@ contract MintingContract is ERC20 {
         uint64 amount; // satoshis
     }
 
+    /// @notice Deposits keyed by requestTx txid. Using the txid as key prevents
+    ///         double-mint attacks: a given requestTx can only back one deposit.
     mapping(bytes32 => DepositInfo) public deposits;
 
-    event Request(bytes32 indexed depositSecretHash, address indexed recipient, uint64 timestamp);
-    event Mint(bytes32 indexed depositSecretHash, address indexed recipient, uint64 amount);
-    event Cancel(bytes32 indexed depositSecretHash, address cancelledBy);
+    event Request(bytes32 indexed requestTxid, address indexed recipient, uint64 timestamp);
+    event Mint(bytes32 indexed requestTxid, address indexed recipient, uint64 amount);
+    event Cancel(bytes32 indexed requestTxid, address cancelledBy);
     event Burn(address indexed account, uint256 amount);
 
     /// @param _committeeInternalPubkey x-only untweaked committee pubkey.
@@ -106,13 +108,12 @@ contract MintingContract is ERC20 {
         // Parse the requestTx
         TxParser.RequestTxData memory tx_ = TxParser.parseRequestTx(rawRequestTx);
 
-        // Each depositSecretHash can only be used once. If a depositor reuses the
-        // same secret without cancelling, this reverts.
-        require(deposits[depositSecretHash].status == DepositStatus.None, "deposit already requested");
+        // Each requestTx txid can only be used once, preventing double-mint.
+        require(deposits[tx_.txid].status == DepositStatus.None, "deposit already requested");
 
         // Extract the tweaked pubkey from the requestTx output 0 (P2TR).
         // This is the committee's internal key taptweak'd with the cancel
-        // script tree — verified below via verifyTweaked.
+        // script tree -- verified below via verifyTweaked.
         bytes memory spk = tx_.output0ScriptPubkey;
         require(spk.length == 34, "bad P2TR script length");
         require(uint8(spk[0]) == 0x51 && uint8(spk[1]) == 0x20, "bad P2TR prefix");
@@ -144,7 +145,7 @@ contract MintingContract is ERC20 {
             "invalid committee signature"
         );
 
-        deposits[depositSecretHash] = DepositInfo({
+        deposits[tx_.txid] = DepositInfo({
             recipient: tx_.recipient,
             depositSecretHash: depositSecretHash,
             requestTimestamp: uint64(block.timestamp),
@@ -152,31 +153,33 @@ contract MintingContract is ERC20 {
             amount: depositSize
         });
 
-        emit Request(depositSecretHash, tx_.recipient, uint64(block.timestamp));
+        emit Request(tx_.txid, tx_.recipient, uint64(block.timestamp));
     }
 
     /// @notice Mint wBTC after the delay period has elapsed.
-    function mint(bytes32 depositSecretHash) external {
-        DepositInfo memory d = deposits[depositSecretHash];
+    function mint(bytes32 requestTxid) external {
+        DepositInfo memory d = deposits[requestTxid];
         require(d.status == DepositStatus.Pending, "not pending");
         require(block.timestamp >= d.requestTimestamp + mintDelay, "mint delay not elapsed");
 
-        deposits[depositSecretHash].status = DepositStatus.Minted;
+        deposits[requestTxid].status = DepositStatus.Minted;
 
         _mint(d.recipient, uint256(d.amount));
 
-        emit Mint(depositSecretHash, d.recipient, d.amount);
+        emit Mint(requestTxid, d.recipient, d.amount);
     }
 
     /// @notice Cancel a pending deposit by revealing the deposit secret preimage.
-    function cancel(bytes32 depositSecret) external {
-        bytes32 depositSecretHash = sha256(abi.encodePacked(depositSecret));
-        DepositInfo memory d = deposits[depositSecretHash];
+    /// @param requestTxid  the requestTx txid identifying this deposit
+    /// @param depositSecret  the preimage whose SHA256 matches the stored hash
+    function cancel(bytes32 requestTxid, bytes32 depositSecret) external {
+        DepositInfo memory d = deposits[requestTxid];
         require(d.status == DepositStatus.Pending, "not pending");
+        require(sha256(abi.encodePacked(depositSecret)) == d.depositSecretHash, "wrong secret");
 
-        deposits[depositSecretHash].status = DepositStatus.Cancelled;
+        deposits[requestTxid].status = DepositStatus.Cancelled;
 
-        emit Cancel(depositSecretHash, msg.sender);
+        emit Cancel(requestTxid, msg.sender);
     }
 
     /// @notice Burn wBTC (user initiates withdrawal from Ethereum back to Bitcoin).
