@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {MintingContract} from "../src/MintingContract.sol";
 import {BIP340} from "../src/BIP340.sol";
+import {BIP341} from "../src/BIP341.sol";
 import {TxParser} from "../src/TxParser.sol";
 
 /// Wraps the internal `TxParser.parseRequestTx` as an external call.
@@ -12,6 +13,29 @@ import {TxParser} from "../src/TxParser.sol";
 contract TxParserHarness {
     function parse(bytes calldata raw) external pure {
         TxParser.parseRequestTx(raw);
+    }
+}
+
+/// Wraps the internal `BIP341.taprootSighash` as an external call for testing.
+contract BIP341Harness {
+    function taprootSighash(
+        uint32 version,
+        uint32 locktime,
+        bytes32 prevoutTxid,
+        uint32 prevoutVout,
+        uint64 prevoutAmount,
+        bytes memory prevoutScriptPubkey,
+        uint32 sequence,
+        uint64 outputAmount,
+        bytes memory outputScriptPubkey,
+        uint8 spendType,
+        uint32 inputIndex
+    ) external pure returns (bytes32) {
+        return BIP341.taprootSighash(
+            version, locktime, prevoutTxid, prevoutVout, prevoutAmount,
+            prevoutScriptPubkey, sequence, outputAmount, outputScriptPubkey,
+            spendType, inputIndex
+        );
     }
 }
 
@@ -151,5 +175,29 @@ contract MintingContractTest is Test {
         tooMany[6] = 0x00;
         vm.expectRevert("too many inputs");
         harness.parse(tooMany);
+    }
+
+    /// BIP341 sighash test vector generated from rust-bitcoin's SighashCache.
+    /// Single-input, single-output depositTx-shaped transaction:
+    ///   version=2, locktime=0, sequence=0xfffffffd, key-path spend (SIGHASH_DEFAULT).
+    function testBIP341SighashVector() public {
+        BIP341Harness bip341 = new BIP341Harness();
+
+        bytes32 sighash = bip341.taprootSighash(
+            2,          // version
+            0,          // locktime
+            0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, // prevout txid
+            0,          // prevout vout
+            100000,     // prevout amount (sats)
+            hex"51208c5db7f797196d6edc4dd7df6048f4ea6b883a6af6af032342088f436543790f", // prevout scriptPubkey
+            0xfffffffd, // sequence (ENABLE_RBF_NO_LOCKTIME)
+            99000,      // output amount (sats)
+            hex"51208c5db7f797196d6edc4dd7df6048f4ea6b883a6af6af032342088f436543790f", // output scriptPubkey
+            0x00,       // spend_type (key-path)
+            0           // input_index
+        );
+
+        // Expected sighash computed by rust-bitcoin SighashCache::taproot_key_spend_signature_hash
+        assertEq(sighash, 0x5f41ab8255a32b13a4eb487c0ee1a60d347874154ca6bb093d9e77dd2afd5319);
     }
 }
