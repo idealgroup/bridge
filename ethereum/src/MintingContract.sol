@@ -20,8 +20,8 @@ contract MintingContract is ERC20 {
     uint32 internal constant LOCKTIME = 0;
     uint32 internal constant SEQUENCE_RBF = 0xFFFFFFFD;
 
-    /// @notice Committee's untweaked x-only internal pubkey. Used by
-    ///         `verifyTweaked` to verify the signature against the internal key.
+    /// @notice Committee's untweaked x-only internal pubkey (same for all deposits).
+    ///         Used by `verifyTweaked` to verify the signature against the internal key.
     bytes32 public immutable committeeInternalPubkey;
 
     /// @notice Deposit output tweaked committee pubkey (x-only): committee internal

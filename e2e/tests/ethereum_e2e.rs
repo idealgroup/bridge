@@ -98,7 +98,7 @@ async fn setup() -> TestFixture {
     let sig_rx = B256::from_slice(&sig_bytes[0..32]);
 
     // 6. Serialize requestTx in non-witness format (for the contract parser).
-    let raw_request_tx_bytes = helpers::serialize_tx_no_witness(&request_tx);
+    let raw_request_tx_bytes = dep_client.request_tx_no_witness(&request_tx);
 
     // 7. Compute the committee's tap-tweaked x-only pubkey (no script tree).
     //    This is the same key committee/deposit.rs uses for Address::p2tr with no merkle root.

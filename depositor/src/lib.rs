@@ -56,6 +56,12 @@ impl DepositorClient {
         Ok(tx)
     }
 
+    /// Serialize a requestTx in non-witness format for submission to the Ethereum
+    /// `MintingContract` (the Solidity `TxParser` expects legacy serialization).
+    pub fn request_tx_no_witness(&self, tx: &Transaction) -> Vec<u8> {
+        bridge::serialize_tx_no_witness(tx)
+    }
+
     /// Build and sign a cancelTx (escape hatch).
     pub fn create_cancel(
         &self,

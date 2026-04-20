@@ -79,15 +79,18 @@ library BIP340 {
         return recovered == expected;
     }
 
-    /// @notice Lift an x-coordinate to the even-y point on secp256k1.
-    /// @return (success, y) where y is even; success=false if x has no valid y.
+    /// @notice Lift an x-coordinate to the even-y point on secp256k1 (per BIP340).
+    /// @return (success, y) where y is even; success=false if x³+7 is not a
+    ///         quadratic residue mod p (no valid point exists for this x).
     function liftX(uint256 x) internal view returns (bool, uint256) {
         if (x == 0 || x >= P) return (false, 0);
+        // c = x³ + 7 mod p
         uint256 c = addmod(mulmod(mulmod(x, x, P), x, P), 7, P);
-        // y = c^((p+1)/4) mod p
+        // Candidate square root via Euler's criterion (p ≡ 3 mod 4).
         uint256 y = modExp(c, (P + 1) / 4, P);
+        // If y² ≠ c, then c is not a QR — no valid point for this x.
         if (mulmod(y, y, P) != c) return (false, 0);
-        // Pick even y
+        // BIP340 requires even y; negate if odd (P - y gives the other root).
         if (y & 1 == 1) {
             y = P - y;
         }
@@ -119,21 +122,9 @@ library BIP340 {
     /// @notice Verify a BIP340 signature against a taproot-tweaked key, given
     ///         the untweaked internal key and a pre-adjusted signature scalar.
     ///
-    /// The caller pre-computes `adjustedS` off-chain:
-    ///   - Even y (tweakedKeyOddY=false): adjustedS = s − e·t mod n
-    ///   - Odd  y (tweakedKeyOddY=true):  adjustedS = s + e·t mod n
-    /// where t = H("TapTweak", P.x || merkleRoot),
-    ///       e = H("BIP0340/challenge", rx || tweakedPx || m).
-    ///
-    /// Security: forging requires breaking standard BIP340 Schnorr
-    /// unforgeability against the committee's internal key.
-    ///
-    /// @param internalPx       committee's untweaked x-only pubkey
-    /// @param tweakedPx        claimed tweaked x-only pubkey (used in BIP340 challenge)
-    /// @param rx               signature R.x
-    /// @param adjustedS        pre-adjusted s' scalar
-    /// @param m                message (BIP341 sighash)
-    /// @param tweakedKeyOddY   true if the tweaked point Q has odd y
+    /// The caller pre-computes `adjustedS` off-chain — see
+    /// `depositor::adjusted_sig::compute_adjusted_sig` and `docs/verify_tweaked_sig.md`
+    /// for the derivation and ecrecover mapping.
     function verifyTweaked(
         bytes32 internalPx,
         bytes32 tweakedPx,
