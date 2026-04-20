@@ -139,18 +139,19 @@ impl Params {
 
     /// Value the depositor must fund into their request UTXO.
     ///
-    /// Equals `deposit_size + dust_amount`. The `dust_amount` surplus is
-    /// what the committee's `depositTx` burns as its own fee (depositTx
-    /// input = `deposit_size + dust_amount`, output = `deposit_size`).
+    /// Currently `deposit_size + dust_amount`. The full amount lands in
+    /// `requestTx` output 0 (the deposit UTXO); the OP_RETURN output 1 is
+    /// zero-valued. The committee's `depositTx` then spends that UTXO and
+    /// creates a single output of `deposit_size`, so the `dust_amount`
+    /// difference is consumed as the `depositTx` miner fee.
     ///
-    /// NOTE: the `requestTx` built on top of this UTXO pays **zero fee**
-    /// (output0 carries the full input amount, output1 is a zero-value
-    /// OP_RETURN). This is a regtest-only shortcut — the test node runs
-    /// with `minrelaytxfee=0`. A production deployment must either:
-    /// - Add a second input to `requestTx` that pays the relay fee
-    ///   (`output[0]` stays the same so the committee's presigned depositTx
-    ///   sighash is unaffected), or
-    /// - Bump `requestTx` via CPFP from a wallet-owned output.
+    /// TODO: this is incomplete — a production deployment should be closer
+    /// to `deposit_size + dust_amount + requestTx_fee + depositTx_fee`.
+    /// Right now both fees are effectively zero (regtest with
+    /// `minrelaytxfee=0`). The `requestTx` fee can be covered by an
+    /// extra input or CPFP without affecting the presigned `depositTx`
+    /// sighash, and the `depositTx` fee allowance needs to be baked into
+    /// this value since it is presigned.
     pub fn request_input_value(&self) -> Amount {
         self.deposit_size + self.dust_amount
     }
