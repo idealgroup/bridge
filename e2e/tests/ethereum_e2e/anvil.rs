@@ -92,6 +92,7 @@ impl AnvilNode {
     }
 
     /// Deploy a fresh `MintingContract` with the given committee keys and mint delay.
+    /// `mint_delay` is in seconds (the contract uses `block.timestamp`).
     pub async fn deploy_minting_contract(
         &self,
         committee_internal_pk: B256,
@@ -105,7 +106,8 @@ impl AnvilNode {
         *instance.address()
     }
 
-    /// Advance the anvil chain's timestamp and mine a new block.
+    /// Advance the anvil chain's `block.timestamp` by `seconds` and mine a block.
+    /// Used to simulate the mint delay (the contract checks `block.timestamp`).
     pub async fn increase_time(&self, seconds: u64) {
         let provider = self.provider();
         // `evm_increaseTime` returns the new offset as a string; accept anything.

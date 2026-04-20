@@ -50,6 +50,7 @@ The caller pre-computes `s'` off-chain (see `depositor::adjusted_sig::compute_ad
 
 - [BIP340 — Schnorr Signatures](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki)
 - [BIP341 — Taproot](https://github.com/bitcoin/bips/blob/master/bip-0341.mediawiki)
+- [ecrecover trick explained](https://hackmd.io/@nZ-twauPRISEa6G9zg3XRw/SyjJzSLt9) — how `ecrecover` is used as a secp256k1 linear combination evaluator
 - [EIP-196 — BN254 ecAdd/ecMul precompiles](https://eips.ethereum.org/EIPS/eip-196)
 - [EIP-1108 — BN254 precompile gas reduction](https://eips.ethereum.org/EIPS/eip-1108)
 
