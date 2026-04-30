@@ -193,6 +193,7 @@ dependencies = [
  "bitcoin",
  "bitcoincore-rpc",
  "lamport",
+ "libc",
  "rand",
  "tempfile",
 ]

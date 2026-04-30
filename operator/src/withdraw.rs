@@ -11,7 +11,7 @@ use bridge::BridgeError;
 /// Operator signs withdraw input 1 (key-spend on connector).
 ///
 /// The timelock is enforced by nSequence on this input, which the committee's
-/// SIGHASH_SINGLE signature on input 0 commits to (BIP 341: all input
+/// SIGHASH_NONE signature on input 0 commits to (BIP 341: all input
 /// sequences are covered regardless of sighash type).
 pub fn sign_withdraw_input1(
     secp: &Secp256k1<bitcoin::secp256k1::All>,

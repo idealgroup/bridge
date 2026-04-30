@@ -9,3 +9,6 @@ bitcoincore-rpc = "0.19"
 lamport = { path = "../lamport" }
 rand = "0.8"
 tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

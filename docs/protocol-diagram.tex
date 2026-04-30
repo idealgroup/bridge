@@ -78,7 +78,7 @@
 \node[align=center, font=\small] at (29.4, 11.8)
   {deposit UTXO};
 \node[align=center, font=\small] at (32.2, 11.8)
-  {OP\_RETURN\\[-1pt]{\scriptsize (dummy, 0\,sat)}};
+  {1\,BTC\\[-1pt]{\scriptsize Operator}};
 
 % in[1] row  (y: 11.2 .. 10.0)
 \draw[thick, dashed] (28, 11.2) -- (33.6, 11.2);     % top border
@@ -91,7 +91,7 @@
 % Exit depositTx right col to the right, go ≥1cm, turn up, go right ≥1cm into withdrawTx in[0] left col
 \draw[covenant] (15.6, 9.8) -- (17, 9.8) -- (17, 11.8) -- (28, 11.8);
 \node[font=\scriptsize, text=cBlue, above, align=center] at (22.5, 11.8)
-  {covenant (n-of-n presigned, SIGHASH\_SINGLE)};
+  {covenant (n-of-n presigned, SIGHASH\_NONE)};
 
 
 % ══════════════════════════════════════════════════════
@@ -256,7 +256,7 @@
     \texttt{cancelTx}             & Depositor & script-path \\[1pt]
     \texttt{fanoutTx}             & Operator  & key-spend \\[1pt]
     \texttt{kickoffTx}\,$\times$3 & Operator  & script-path \\[1pt]
-    \texttt{withdrawTx}\,in0      & Committee & \texttt{SH\_SINGLE} \\[1pt]
+    \texttt{withdrawTx}\,in0      & Committee & \texttt{SH\_NONE} \\[1pt]
     \texttt{withdrawTx}\,in1      & Operator  & key-spend \\[1pt]
     \texttt{disproveTx}           & (none)    & hash preimage \\
     \end{tabular}};
@@ -267,9 +267,9 @@
     \textbullet\; All hashes SHA-256 (32-byte)\\[1pt]
     \textbullet\; kickoffTx txid is deterministic\\
     \phantom{\textbullet}\; (Lamport sig is witness-only)\\[1pt]
-    \textbullet\; withdrawTx in[0]: \texttt{SIGHASH\_SINGLE}\\
-    \phantom{\textbullet}\; commits to OP\_RETURN out[0];\\
-    \phantom{\textbullet}\; operator sets out[1] (payment/fees)\\[1pt]
+    \textbullet\; withdrawTx in[0]: \texttt{SIGHASH\_NONE}\\
+    \phantom{\textbullet}\; commits to no outputs;\\
+    \phantom{\textbullet}\; operator adds all outputs at broadcast\\[1pt]
     \textbullet\; Timelock via \texttt{nSequence} committed\\
     \phantom{\textbullet}\; in committee's presigned input};
 

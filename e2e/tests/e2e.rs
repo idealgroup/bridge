@@ -86,17 +86,22 @@ fn test_happy_path_deposit_and_withdraw() {
     };
     let withdraw_prevouts = vec![deposit_tx.output[0].clone(), connector_output];
 
-    // === 7. Committee presigns withdraw ===
-    let presigned_withdraw = committee_client
+    // === 7. Committee presigns withdraw (SIGHASH_NONE on input 0, no outputs) ===
+    let mut presigned_withdraw = committee_client
         .presign_withdraw(
             deposit_txid,
             kickoff_txid,
-            op_client.operator.pubkey,
             &withdraw_prevouts,
         )
         .unwrap();
 
-    // Hand presigned withdraw to operator
+    // Operator adds payment output before storing
+    let operator_address =
+        Address::p2tr(&secp, op_client.operator.pubkey, None, Network::Bitcoin);
+    presigned_withdraw.output.push(TxOut {
+        value: params.deposit_size,
+        script_pubkey: operator_address.script_pubkey(),
+    });
     op_client
         .receive_presigned_withdraw(presigned_withdraw)
         .unwrap();
@@ -125,17 +130,15 @@ fn test_happy_path_deposit_and_withdraw() {
     network.mine_blocks(1).unwrap();
 
     // === 11. Assert withdraw output pays operator deposit_size ===
-    assert_eq!(withdraw_tx.output[1].value, params.deposit_size);
-    let operator_address =
-        Address::p2tr(&secp, op_client.operator.pubkey, None, Network::Bitcoin);
+    assert_eq!(withdraw_tx.output[0].value, params.deposit_size);
     assert_eq!(
-        withdraw_tx.output[1].script_pubkey,
+        withdraw_tx.output[0].script_pubkey,
         operator_address.script_pubkey()
     );
 }
 
-/// Operator modifies withdrawTx output after committee presigning (SIGHASH_SINGLE
-/// on input 0 only commits to the OP_RETURN at output 0, not the operator payment).
+/// Operator adds custom outputs to withdrawTx after committee presigning (SIGHASH_NONE
+/// on input 0 commits to no outputs, so the operator adds all outputs at broadcast time).
 #[test]
 fn test_withdraw_operator_can_modify_payment_output() {
     let secp = Secp256k1::new();
@@ -195,26 +198,27 @@ fn test_withdraw_operator_can_modify_payment_output() {
     };
     let withdraw_prevouts = vec![deposit_tx.output[0].clone(), connector_output];
 
-    // === 5. Committee presigns withdraw (SIGHASH_SINGLE on input 0) ===
+    // === 5. Committee presigns withdraw (SIGHASH_NONE on input 0, no outputs) ===
     let presigned_withdraw = committee_client
         .presign_withdraw(
             deposit_txid,
             kickoff_txid,
-            op_client.operator.pubkey,
             &withdraw_prevouts,
         )
         .unwrap();
 
-    // === 6. Operator modifies output[1] — different address and deducts fee ===
+    // === 6. Operator adds custom output — different address and deducts fee ===
     let mut withdraw_tx = presigned_withdraw;
     let fee = bitcoin::Amount::from_sat(10_000);
     let alt_sk = bitcoin::secp256k1::SecretKey::new(&mut rng);
     let alt_pk = alt_sk.x_only_public_key(&secp).0;
     let alt_address = Address::p2tr(&secp, alt_pk, None, Network::Bitcoin);
-    withdraw_tx.output[1].value = params.deposit_size - fee;
-    withdraw_tx.output[1].script_pubkey = alt_address.script_pubkey();
+    withdraw_tx.output.push(TxOut {
+        value: params.deposit_size - fee,
+        script_pubkey: alt_address.script_pubkey(),
+    });
 
-    // Store modified tx and proceed
+    // Store tx with operator-chosen outputs
     op_client.receive_presigned_withdraw(withdraw_tx).unwrap();
 
     // === 7. Operator creates and broadcasts kickoff ===
@@ -238,21 +242,21 @@ fn test_withdraw_operator_can_modify_payment_output() {
         .unwrap();
     network.mine_blocks(1).unwrap();
 
-    // === 10. Assert output[1] has modified value and different address ===
-    assert_eq!(withdraw_tx.output[1].value, params.deposit_size - fee);
-    assert_eq!(withdraw_tx.output[1].script_pubkey, alt_address.script_pubkey());
+    // === 10. Assert output[0] has custom value and different address ===
+    assert_eq!(withdraw_tx.output[0].value, params.deposit_size - fee);
+    assert_eq!(withdraw_tx.output[0].script_pubkey, alt_address.script_pubkey());
 
     // === 11. Alt key spends the withdraw output ===
     let withdraw_txid = withdraw_tx.compute_txid();
     let alt_keypair = Keypair::from_secret_key(&secp, &alt_sk);
     let tweaked = alt_keypair.tap_tweak(&secp, None);
 
-    let spend_value = withdraw_tx.output[1].value - bitcoin::Amount::from_sat(1_000);
+    let spend_value = withdraw_tx.output[0].value - bitcoin::Amount::from_sat(1_000);
     let mut spend_tx = Transaction {
         version: Version::TWO,
         lock_time: LockTime::ZERO,
         input: vec![TxIn {
-            previous_output: OutPoint::new(withdraw_txid, 1),
+            previous_output: OutPoint::new(withdraw_txid, 0),
             script_sig: ScriptBuf::new(),
             sequence: bitcoin::Sequence::ENABLE_RBF_NO_LOCKTIME,
             witness: Witness::new(),
@@ -263,7 +267,7 @@ fn test_withdraw_operator_can_modify_payment_output() {
         }],
     };
 
-    let prevouts = [withdraw_tx.output[1].clone()];
+    let prevouts = [withdraw_tx.output[0].clone()];
     let mut cache = SighashCache::new(&spend_tx);
     let sighash = cache
         .taproot_key_spend_signature_hash(
@@ -402,14 +406,21 @@ fn test_fraud_proof_disprove() {
     };
     let withdraw_prevouts = vec![deposit_tx.output[0].clone(), connector_output];
 
-    let presigned_withdraw = committee_client
+    let mut presigned_withdraw = committee_client
         .presign_withdraw(
             deposit_txid,
             kickoff_txid,
-            op_client.operator.pubkey,
             &withdraw_prevouts,
         )
         .unwrap();
+
+    // Operator adds payment output before storing
+    let operator_address =
+        Address::p2tr(&secp, op_client.operator.pubkey, None, Network::Bitcoin);
+    presigned_withdraw.output.push(TxOut {
+        value: params.deposit_size,
+        script_pubkey: operator_address.script_pubkey(),
+    });
     op_client
         .receive_presigned_withdraw(presigned_withdraw)
         .unwrap();

@@ -46,13 +46,30 @@ impl RegtestNode {
         )
         .map_err(|e| BridgeError::Regtest(format!("write bitcoin.conf: {e}")))?;
 
-        let child = Command::new(&bitcoind)
-            .arg("-regtest")
+        let mut cmd = Command::new(&bitcoind);
+        cmd.arg("-regtest")
             .arg(format!("-datadir={}", datadir.path().display()))
             .arg(format!("-rpcport={port}"))
             .arg("-daemon=0")
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+
+        // macOS can report a huge RLIMIT_NOFILE soft limit that bitcoind's
+        // setrlimit cannot raise to, leaving it with -1 available FDs.
+        // Set a sane limit before exec so bitcoind starts correctly.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                cmd.pre_exec(|| {
+                    let limit = libc::rlimit { rlim_cur: 4096, rlim_max: 4096 };
+                    libc::setrlimit(libc::RLIMIT_NOFILE, &limit);
+                    Ok(())
+                });
+            }
+        }
+
+        let child = cmd
             .spawn()
             .map_err(|e| BridgeError::Regtest(format!("spawn bitcoind: {e}")))?;
 

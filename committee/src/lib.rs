@@ -1,7 +1,6 @@
 pub mod deposit;
 pub mod withdraw;
 
-use bitcoin::key::UntweakedPublicKey as XOnlyPublicKey;
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::transaction::{Transaction, TxOut};
 use bitcoin::Txid;
@@ -57,19 +56,16 @@ impl CommitteeClient {
         Ok(tx)
     }
 
-    /// Presign withdrawTx input 0 (key-spend on deposit output).
+    /// Presign withdrawTx input 0 (key-spend on deposit output, SIGHASH_NONE).
     pub fn presign_withdraw(
         &self,
         deposit_txid: Txid,
         kickoff_txid: Txid,
-        operator_pubkey: XOnlyPublicKey,
         withdraw_prevouts: &[TxOut],
     ) -> Result<Transaction, BridgeError> {
         let mut tx = withdraw::build_withdraw_tx(
-            &self.secp,
             deposit_txid,
             kickoff_txid,
-            operator_pubkey,
             &self.params,
         )?;
         withdraw::presign_withdraw_input0(
