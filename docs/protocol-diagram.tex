@@ -44,11 +44,11 @@
 \draw[thick] (0, 10.6) -- (5.6, 10.6);           % top border
 \draw[thick] (2.8, 10.6) -- (2.8, 8.0);           % divider (extended for OP_RETURN row)
 
-\node[align=center] at (1.4, 9.8) {1\,BTC\\[-1pt]{\small Depositor}};
-\node[align=center] at (4.2, 9.8) {1\,BTC\\[-1pt]{\small n-of-n}};
+\node[align=center] at (1.4, 9.8) {1\,BTC\,+\,dust\\[-1pt]{\small Depositor}};
+\node[align=center] at (4.2, 9.8) {1\,BTC\,+\,dust\\[-1pt]{\small n-of-n}};
 \draw[thick] (2.8, 9.0) -- (5.6, 9.0);            % right col row divider
 \node[align=center, font=\small] at (4.2, 8.5)
-  {OP\_RETURN\\[-1pt]{\scriptsize Starknet addr}};
+  {OP\_RETURN\\[-1pt]{\scriptsize Ethereum addr}};
 
 % Depositor funds requestTx (enter left col)
 \draw[plain] (-2.5, 9.8) -- (0, 9.8);
@@ -60,7 +60,7 @@
 \draw[thick, dashed] (10, 10.6) -- (15.6, 10.6);          % top border
 \draw[thick, dashed] (12.8, 10.6) -- (12.8, 9.0);         % divider
 
-\node[align=center] at (11.4, 9.8) {1\,BTC\\[-1pt]{\small request out}};
+\node[align=center] at (11.4, 9.8) {1\,BTC\,+\,dust\\[-1pt]{\small request out}};
 \node[align=center] at (14.2, 9.8) {1\,BTC\\[-1pt]{\small committee}};
 
 % requestTx → depositTx  (exit right col, enter left col)
@@ -173,46 +173,72 @@
 
 
 % ══════════════════════════════════════════════════════
-%  ETHEREUM  (not implemented)
+%  ETHEREUM
 % ══════════════════════════════════════════════════════
 
 \draw[thick, dashed, black!25] (-3, 2.5) -- (37, 2.5);
 \node[font=\itshape\small, text=black!30, fill=white, inner sep=3pt]
   at (17, 2.5) {chain boundary};
 
-\node[font=\bfseries\small, text=cGrey, anchor=west]
+\node[font=\bfseries\small, anchor=west]
   at (-2.5, 1.6) {ETHEREUM};
-\node[font=\scriptsize, text=cGrey!70,
-  draw=cGrey!40, dashed, rounded corners=2pt,
-  inner sep=3pt, anchor=west] at (1.5, 1.6)
-  {not yet implemented};
 
-% Minting Contract
-\node[font=\bfseries\normalsize, text=cGrey, anchor=south west]
-  at (1, 1.0) {Minting Contract};
-\draw[thick, dashed, black!30] (1, 0.9) rectangle (8.5, -2.0);
-\node[font=\scriptsize, text=cGrey, anchor=north west, align=left]
-  at (1.3, 0.7) {%
-  \textbullet\; \texttt{request($\theta_1$, H(S\textsubscript{depositor}))}\\[1pt]
-  \textbullet\; \texttt{mint(depositorId, 1\,wBTC)}\\[1pt]
-  \textbullet\; \texttt{cancel(S\textsubscript{depositor})}\\[1pt]
-  \textbullet\; \texttt{happyMint($\theta_2$)}};
+% Minting Contract (ERC20)
+\node[font=\bfseries\normalsize, anchor=south west]
+  at (1, 1.0) {MintingContract {\small (ERC20 wBTC, 8 decimals)}};
+\draw[thick] (1, 0.9) rectangle (34, -3.0);
 
-% Burn Contract
-\node[font=\bfseries\normalsize, text=cGrey, anchor=south west]
-  at (16, 1.0) {Burn Contract};
-\draw[thick, dashed, black!30] (16, 0.9) rectangle (24, -0.8);
-\node[font=\scriptsize, text=cGrey, anchor=north west, align=left]
-  at (16.3, 0.7) {%
-  \textbullet\; \texttt{burn(operator\_id, wBTC,}\\
-  \phantom{\textbullet\;} \texttt{utxo\_index)}};
+% --- Deposit flow label ---
+\node[font=\scriptsize\itshape, text=cGrey, anchor=west] at (1.5, 0.55)
+  {Deposit flow};
 
-% wBTC arrow
-\draw[thick, dashed, cGrey!40,
-  {Stealth[length=4pt]}-{Stealth[length=4pt]}]
-  (8.5, -0.5) --
-  node[font=\tiny, text=cGrey, above]{wBTC}
-  (16, -0.5);
+% request box
+\node[draw, rounded corners=3pt, thick,
+      minimum width=3.2cm, minimum height=1.5cm,
+      align=center, font=\small] (ethreq) at (5.5, -0.9)
+  {\texttt{request}\\[1pt]
+   {\tiny parses requestTx, verifies}\\[-1pt]
+   {\tiny BIP340 sig on depositTx sighash}};
+
+% mint box
+\node[draw, rounded corners=3pt, thick,
+      minimum width=2.8cm, minimum height=1cm,
+      align=center, font=\small] (ethmint) at (15, -0.1)
+  {\texttt{mint}\\[-1pt]
+   {\tiny mints wBTC to OP\_RETURN recipient}};
+
+% cancel box
+\node[draw, rounded corners=3pt, thick,
+      minimum width=2.8cm, minimum height=1cm,
+      align=center, font=\small] (ethcancel) at (15, -1.8)
+  {\texttt{cancel}\\[-1pt]
+   {\tiny reveals S, blocks mint}};
+
+% Fork: request → mint OR cancel
+\coordinate (ethfork) at ($(ethreq.east) + (1.8, 0)$);
+\draw[thick] (ethreq.east) -- (ethfork);
+\draw[-{Stealth[length=5pt]}, thick]
+  (ethfork) |- (ethmint.west);
+\draw[-{Stealth[length=5pt]}, thick, cRed]
+  (ethfork) |- (ethcancel.west);
+\node[font=\tiny, text=cGrey, anchor=south west]
+  at ($(ethfork) + (0.2, 0.05)$) {after mint\_delay};
+\node[font=\tiny, text=cRed!70, anchor=north west]
+  at ($(ethfork) + (0.2, -0.05)$) {preimage S};
+
+% --- Separator ---
+\draw[thick, black!15] (21.5, 0.55) -- (21.5, -2.7);
+
+% --- Withdrawal label ---
+\node[font=\scriptsize\itshape, text=cGrey, anchor=west] at (22, 0.55)
+  {Withdrawal};
+
+% burn box
+\node[draw, rounded corners=3pt, thick,
+      minimum width=2.8cm, minimum height=1cm,
+      align=center, font=\small] (ethburn) at (28, -0.9)
+  {\texttt{burn}\\[-1pt]
+   {\tiny burns wBTC, initiates BTC withdrawal}};
 
 % Cross-chain: cancel → cancels mint
 \draw[dashed, cRed!30, -{Stealth[length=4pt]}]
@@ -276,7 +302,7 @@
   \node[font=\bfseries\normalsize, anchor=north west] at (0, -11.4) {Parameters};
   \node[font=\scriptsize, anchor=north west, text width=7cm] at (0, -12.0) {%
     \texttt{DEPOSIT\_SIZE} = 1\,BTC \qquad
-    \texttt{DUST} = 546\,sat\\[1pt]
+    \texttt{DUST} = 330\,sat\\[1pt]
     \texttt{DEPOSIT\_COUNT} = 10\,000 \qquad
     \texttt{OPERATORS} = 50\\[1pt]
     \texttt{COMMITTEE} = 10\,(n-of-n) \quad

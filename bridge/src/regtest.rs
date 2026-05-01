@@ -28,7 +28,13 @@ impl RegtestNode {
         let rpc_user = "idealtest";
         let rpc_pass = "idealtest";
 
-        // Write bitcoin.conf
+        // Write bitcoin.conf.
+        //
+        // `minrelaytxfee=0` + `blockmintxfee=0` are load-bearing: the
+        // depositor's `requestTx` has zero fee (see
+        // `depositor::request::build_request_tx` and
+        // `bridge::params::Params::request_input_value`). Default bitcoind
+        // relay policy would reject it.
         let conf_path = datadir.path().join("bitcoin.conf");
         std::fs::write(
             &conf_path,
@@ -95,8 +101,11 @@ impl RegtestNode {
             thread::sleep(Duration::from_millis(100));
         }
 
-        // Create default wallet
-        let _ = client.create_wallet("default", None, None, None, None);
+        // Create a fresh default wallet. The tempdir is new so the wallet cannot
+        // already exist — any failure here is a real problem and should surface.
+        client
+            .create_wallet("default", None, None, None, None)
+            .map_err(|e| BridgeError::Regtest(format!("create_wallet: {e}")))?;
 
         Ok(Self {
             client,

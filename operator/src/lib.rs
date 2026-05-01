@@ -4,9 +4,10 @@ pub mod withdraw;
 
 use std::collections::HashMap;
 
+use bitcoin::script::ScriptBuf;
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::transaction::{Transaction, TxOut};
-use bitcoin::{Address, Network, Txid};
+use bitcoin::Txid;
 
 use bridge::actor::Operator;
 use bridge::network::BitcoinNetwork;
@@ -40,13 +41,11 @@ impl OperatorClient {
         if self.fanout_tree.is_none() {
             let init_txout = TxOut {
                 value: self.params.fanout_init_value(),
-                script_pubkey: Address::p2tr(
+                script_pubkey: ScriptBuf::new_p2tr(
                     &self.secp,
                     self.operator.pubkey,
                     None,
-                    Network::Bitcoin,
-                )
-                .script_pubkey(),
+                ),
             };
             let mut tree =
                 fanout::build_fanout_tree(&self.secp, &self.operator, &self.params)?;

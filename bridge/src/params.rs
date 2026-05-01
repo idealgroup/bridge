@@ -20,7 +20,7 @@ impl Default for Params {
     fn default() -> Self {
         let p = Self {
             deposit_size: Amount::from_int_btc(1),
-            dust_amount: Amount::from_sat(546),
+            dust_amount: Amount::from_sat(330),
             proof_size: 256,
             deposit_count: 10_000,
             operator_count: 50,
@@ -42,7 +42,7 @@ impl Params {
     pub fn test_defaults() -> Self {
         let p = Self {
             deposit_size: Amount::from_sat(100_000),
-            dust_amount: Amount::from_sat(546),
+            dust_amount: Amount::from_sat(330),
             proof_size: 256,
             deposit_count: 4,
             operator_count: 2,
@@ -138,7 +138,20 @@ impl Params {
     }
 
     /// Value the depositor must fund into their request UTXO.
-    /// Must exceed `deposit_size` so the difference covers the deposit tx fee.
+    ///
+    /// Currently `deposit_size + dust_amount`. The full amount lands in
+    /// `requestTx` output 0 (the deposit UTXO); the OP_RETURN output 1 is
+    /// zero-valued. The committee's `depositTx` then spends that UTXO and
+    /// creates a single output of `deposit_size`, so the `dust_amount`
+    /// difference is consumed as the `depositTx` miner fee.
+    ///
+    /// TODO: this is incomplete — a production deployment should be closer
+    /// to `deposit_size + dust_amount + requestTx_fee + depositTx_fee`.
+    /// Right now both fees are effectively zero (regtest with
+    /// `minrelaytxfee=0`). The `requestTx` fee can be covered by an
+    /// extra input or CPFP without affecting the presigned `depositTx`
+    /// sighash, and the `depositTx` fee allowance needs to be baked into
+    /// this value since it is presigned.
     pub fn request_input_value(&self) -> Amount {
         self.deposit_size + self.dust_amount
     }

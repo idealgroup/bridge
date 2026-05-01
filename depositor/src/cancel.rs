@@ -6,7 +6,7 @@ use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::taproot::{LeafVersion, TapLeafHash, TaprootSpendInfo};
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
-use bitcoin::{Address, Network, ScriptBuf, Txid, Witness};
+use bitcoin::{ScriptBuf, Txid, Witness};
 
 use bridge::actor::Depositor;
 use bridge::params::Params;
@@ -23,8 +23,6 @@ pub fn build_cancel_tx(
     request_txid: Txid,
     params: &Params,
 ) -> Result<Transaction, BridgeError> {
-    let depositor_address = Address::p2tr(secp, depositor.pubkey, None, Network::Bitcoin);
-
     Ok(Transaction {
         version: Version::TWO,
         lock_time: LockTime::ZERO,
@@ -36,7 +34,7 @@ pub fn build_cancel_tx(
         }],
         output: vec![TxOut {
             value: params.deposit_size,
-            script_pubkey: depositor_address.script_pubkey(),
+            script_pubkey: ScriptBuf::new_p2tr(secp, depositor.pubkey, None),
         }],
     })
 }
@@ -90,7 +88,7 @@ pub fn sign_cancel_tx(
 mod tests {
     use super::*;
     use bridge::actor::Committee;
-    use bridge::network::BITCOIN_NETWORK;
+    use bridge::test_support::BITCOIN_NETWORK;
     use bitcoin::OutPoint;
     use bitcoin::hashes::Hash;
     use rand::rngs::StdRng;
@@ -128,11 +126,10 @@ mod tests {
         let committee = Committee::new(&mut rng, &secp);
 
         // Build and sign request_tx (parent)
-        let mut request_tx = crate::request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
+        let mut request_tx = crate::request::build_request_tx(&secp, depositor.pubkey, depositor.deposit_secret_hash(), depositor.request_utxo, committee.pubkey, &params, &[0xaa; 20]).unwrap();
         let depositor_prevout = TxOut {
             value: params.request_input_value(),
-            script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
-                .script_pubkey(),
+            script_pubkey: ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),
         };
         crate::request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
@@ -179,11 +176,10 @@ mod tests {
         depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let mut request_tx = crate::request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
+        let mut request_tx = crate::request::build_request_tx(&secp, depositor.pubkey, depositor.deposit_secret_hash(), depositor.request_utxo, committee.pubkey, &params, &[0xaa; 20]).unwrap();
         let depositor_prevout = TxOut {
             value: params.request_input_value(),
-            script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
-                .script_pubkey(),
+            script_pubkey: ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),
         };
         crate::request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();
@@ -223,11 +219,10 @@ mod tests {
         depositor.request_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, depositor.pubkey, params.request_input_value()).unwrap();
         let committee = Committee::new(&mut rng, &secp);
 
-        let mut request_tx = crate::request::build_request_tx(&secp, &depositor, committee.pubkey, &params).unwrap();
+        let mut request_tx = crate::request::build_request_tx(&secp, depositor.pubkey, depositor.deposit_secret_hash(), depositor.request_utxo, committee.pubkey, &params, &[0xaa; 20]).unwrap();
         let depositor_prevout = TxOut {
             value: params.request_input_value(),
-            script_pubkey: bitcoin::Address::p2tr(&secp, depositor.pubkey, None, bitcoin::Network::Bitcoin)
-                .script_pubkey(),
+            script_pubkey: ScriptBuf::new_p2tr(&secp, depositor.pubkey, None),
         };
         crate::request::sign_request_tx(&secp, &mut request_tx, &depositor.keypair, &[depositor_prevout]).unwrap();
         BITCOIN_NETWORK.broadcast_tx(&request_tx).unwrap();

@@ -17,6 +17,7 @@
             pkgs.pkg-config
             pkgs.openssl
             pkgs.bitcoind
+            pkgs.foundry
           ];
 
           REGTEST_DIR = ".data/regtest";

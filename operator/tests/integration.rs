@@ -1,9 +1,8 @@
 use bitcoin::secp256k1::Secp256k1;
 
 use bridge::actor::Operator;
-use bridge::network::BITCOIN_NETWORK;
 use bridge::params::Params;
-use bridge::test_support::{test_rng_seeded, dummy_outpoint};
+use bridge::test_support::{test_rng_seeded, dummy_outpoint, BITCOIN_NETWORK};
 
 use operator::OperatorClient;
 

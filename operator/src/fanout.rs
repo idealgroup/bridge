@@ -4,7 +4,7 @@ use bitcoin::key::{Keypair, TapTweak, UntweakedPublicKey as XOnlyPublicKey};
 use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::{Transaction, TxIn, TxOut, Version};
-use bitcoin::{Address, Network, OutPoint, ScriptBuf, Witness};
+use bitcoin::{OutPoint, ScriptBuf, Witness};
 
 use bridge::actor::Operator;
 use bridge::params::Params;
@@ -211,12 +211,12 @@ fn build_intermediate_tx(
     params: &Params,
     output_value: bitcoin::Amount,
 ) -> Transaction {
-    let address = Address::p2tr(secp, operator_pubkey, None, Network::Bitcoin);
+    let script_pubkey = ScriptBuf::new_p2tr(secp, operator_pubkey, None);
 
     let outputs: Vec<TxOut> = (0..params.fanout_branching)
         .map(|_| TxOut {
             value: output_value,
-            script_pubkey: address.script_pubkey(),
+            script_pubkey: script_pubkey.clone(),
         })
         .collect();
 
@@ -315,7 +315,7 @@ mod tests {
         let mut rng = test_rng();
         let params = Params::test_defaults();
 
-        use bridge::network::BITCOIN_NETWORK;
+        use bridge::test_support::BITCOIN_NETWORK;
 
         let mut operator = Operator::new(&mut rng, &secp, OutPoint::new(Txid::all_zeros(), 0), params.deposit_count);
         operator.init_utxo = BITCOIN_NETWORK.fund_p2tr(&secp, operator.pubkey, params.fanout_init_value()).unwrap();
@@ -323,8 +323,7 @@ mod tests {
         let mut tree = build_fanout_tree(&secp, &operator, &params).unwrap();
         let init_txout = TxOut {
             value: params.fanout_init_value(),
-            script_pubkey: Address::p2tr(&secp, operator.pubkey, None, Network::Bitcoin)
-                .script_pubkey(),
+            script_pubkey: ScriptBuf::new_p2tr(&secp, operator.pubkey, None),
         };
         sign_fanout_tree(&secp, &mut tree, &operator.keypair, &init_txout, &params).unwrap();
 

@@ -1,11 +1,12 @@
 pub mod deposit;
 pub mod withdraw;
 
+use bitcoin::key::UntweakedPublicKey as XOnlyPublicKey;
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::transaction::{Transaction, TxOut};
 use bitcoin::Txid;
 
-use bridge::actor::{Committee, Depositor};
+use bridge::actor::Committee;
 use bridge::params::Params;
 use bridge::scripts;
 use bridge::BridgeError;
@@ -26,17 +27,25 @@ impl CommitteeClient {
     }
 
     /// Presign a depositTx (key-spend on request output).
+    ///
+    /// The committee only needs the depositor's public parameters:
+    /// - `depositor_pubkey`: x-only pubkey used in the request spend tree
+    /// - `deposit_secret_hash`: SHA256(deposit_secret), committed in the cancel script leaf
+    ///
+    /// These are exactly the fields the depositor sends alongside their deposit
+    /// request over the wire. The depositor's private key stays on their side.
     pub fn presign_deposit(
         &self,
         request_txid: Txid,
-        depositor: &Depositor,
+        depositor_pubkey: XOnlyPublicKey,
+        deposit_secret_hash: [u8; 32],
         request_prevout: &TxOut,
     ) -> Result<Transaction, BridgeError> {
         let request_spend_info = scripts::request_spend_info(
             &self.secp,
             self.committee.pubkey,
-            depositor.pubkey,
-            depositor.deposit_secret_hash(),
+            depositor_pubkey,
+            deposit_secret_hash,
             self.params.deposit_timeout,
         )?;
         let mut tx = deposit::build_deposit_tx(
