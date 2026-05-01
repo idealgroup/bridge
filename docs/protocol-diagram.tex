@@ -173,7 +173,7 @@
 
 
 % ══════════════════════════════════════════════════════
-%  ETHEREUM
+%  ETHEREUM  +  CROSS-CHAIN ARROWS
 % ══════════════════════════════════════════════════════
 
 \draw[thick, dashed, black!25] (-3, 2.5) -- (37, 2.5);
@@ -181,71 +181,88 @@
   at (17, 2.5) {chain boundary};
 
 \node[font=\bfseries\small, anchor=west]
-  at (-2.5, 1.6) {ETHEREUM};
+  at (-0.5, 1.6) {ETHEREUM};
 
-% Minting Contract (ERC20)
+% Minting Contract label (no box)
 \node[font=\bfseries\normalsize, anchor=south west]
-  at (1, 1.0) {MintingContract {\small (ERC20 wBTC, 8 decimals)}};
-\draw[thick] (1, 0.9) rectangle (34, -3.0);
+  at (-0.5, 0.8) {MintingContract {\small (ERC20 ``Wrapped BTC'', 8 decimals)}};
 
-% --- Deposit flow label ---
-\node[font=\scriptsize\itshape, text=cGrey, anchor=west] at (1.5, 0.55)
-  {Deposit flow};
-
-% request box
+% request() — on-chain verification pipeline
 \node[draw, rounded corners=3pt, thick,
-      minimum width=3.2cm, minimum height=1.5cm,
-      align=center, font=\small] (ethreq) at (5.5, -0.9)
-  {\texttt{request}\\[1pt]
-   {\tiny parses requestTx, verifies}\\[-1pt]
-   {\tiny BIP340 sig on depositTx sighash}};
+      minimum width=8.5cm, minimum height=3.2cm,
+      align=center, font=\small] (ethreq) at (5.8, -1.8)
+  {\texttt{request(rawRequestTx, depositSecretHash,}\\[-1pt]
+   \texttt{sigRx, sigS, tweakedKeyOddY)}\\[4pt]
+   {\scriptsize \textbf{1.}\;TxParser: extract txid, spk, recipient}\\[1pt]
+   {\scriptsize \textbf{2.}\;BIP341: reconstruct depositTx sighash}\\[1pt]
+   {\scriptsize \textbf{3.}\;BIP340: verify tweaked committee Schnorr sig}\\[4pt]
+   {\scriptsize $\rightarrow$ deposits[txid]\,=\,\{recipient,\,hash,\,Pending\}}};
 
 % mint box
 \node[draw, rounded corners=3pt, thick,
-      minimum width=2.8cm, minimum height=1cm,
-      align=center, font=\small] (ethmint) at (15, -0.1)
-  {\texttt{mint}\\[-1pt]
-   {\tiny mints wBTC to OP\_RETURN recipient}};
+      minimum width=3.4cm, minimum height=1.6cm,
+      align=center, font=\small] (ethmint) at (18.5, -0.2)
+  {\texttt{mint(txid)}\\[1pt]
+   {\scriptsize after mintDelay $\rightarrow$ \textbf{Minted}}\\[1pt]
+   {\scriptsize mints wBTC to recipient}};
 
 % cancel box
 \node[draw, rounded corners=3pt, thick,
-      minimum width=2.8cm, minimum height=1cm,
-      align=center, font=\small] (ethcancel) at (15, -1.8)
-  {\texttt{cancel}\\[-1pt]
-   {\tiny reveals S, blocks mint}};
+      minimum width=3.4cm, minimum height=1.6cm,
+      align=center, font=\small] (ethcancel) at (18.5, -3.4)
+  {\texttt{cancel(txid, secret)}\\[1pt]
+   {\scriptsize SHA256(secret)\,==\,hash}\\[1pt]
+   {\scriptsize blocks mint $\rightarrow$ \textbf{Cancelled}}};
 
 % Fork: request → mint OR cancel
-\coordinate (ethfork) at ($(ethreq.east) + (1.8, 0)$);
+\coordinate (ethfork) at ($(ethreq.east) + (1.5, 0)$);
 \draw[thick] (ethreq.east) -- (ethfork);
 \draw[-{Stealth[length=5pt]}, thick]
   (ethfork) |- (ethmint.west);
+\node[font=\scriptsize, text=cGrey, above] at (15.5, -0.2) {after mintDelay};
 \draw[-{Stealth[length=5pt]}, thick, cRed]
   (ethfork) |- (ethcancel.west);
-\node[font=\tiny, text=cGrey, anchor=south west]
-  at ($(ethfork) + (0.2, 0.05)$) {after mint\_delay};
-\node[font=\tiny, text=cRed!70, anchor=north west]
-  at ($(ethfork) + (0.2, -0.05)$) {preimage S};
+\node[font=\scriptsize, text=cRed!70, above] at (14.5, -3.4) {requires depositSecret};
 
 % --- Separator ---
-\draw[thick, black!15] (21.5, 0.55) -- (21.5, -2.7);
+\draw[thick, black!15] (22, 0.4) -- (22, -4.8);
 
 % --- Withdrawal label ---
-\node[font=\scriptsize\itshape, text=cGrey, anchor=west] at (22, 0.55)
-  {Withdrawal};
+\node[font=\scriptsize\itshape, text=cGrey, anchor=west] at (22.5, 0.2)
+  {Withdrawal flow};
 
 % burn box
 \node[draw, rounded corners=3pt, thick,
-      minimum width=2.8cm, minimum height=1cm,
-      align=center, font=\small] (ethburn) at (28, -0.9)
-  {\texttt{burn}\\[-1pt]
-   {\tiny burns wBTC, initiates BTC withdrawal}};
+      minimum width=3.4cm, minimum height=1.6cm,
+      align=center, font=\small] (ethburn) at (28, -1.8)
+  {\texttt{burn(amount)}\\[1pt]
+   {\scriptsize burns wBTC (ERC20)}\\[1pt]
+   {\scriptsize emits Burn event}};
 
-% Cross-chain: cancel → cancels mint
-\draw[dashed, cRed!30, -{Stealth[length=4pt]}]
+% ── Cross-chain arrows ──
+
+% 1. requestTx data → Ethereum request()
+%    Route: from OP_RETURN bottom, left, down the left margin, into request box
+\draw[dashed, cBlue!50, -{Stealth[length=4pt]}, semithick]
+  (3.5, 8.0) -- (3.5, 7.8) -- (-1.5, 7.8) -- (-1.5, -1.8) -- (ethreq.west);
+\node[font=\tiny, text=cBlue!60, anchor=east, align=right] at (-1.7, 3.0)
+  {rawRequestTx\\+ committee sig};
+
+% 2. cancelTx reveals depositSecret → same secret cancels on Ethereum
+%    Route: from cancelTx bottom, down through chain boundary, to "reveal depositSecret" label
+\draw[dashed, cRed!40, -{Stealth[length=4pt]}]
   (1.4, 4.0) -- (1.4, 3.2)
-  -- node[font=\tiny, text=cRed!50, above, pos=0.6]
-    {reveals S $\rightarrow$ cancels mint}
-  (4.5, 3.2) -- (4.5, 0.9);
+  -- node[font=\tiny, text=cRed!50, above, pos=0.4]
+    {revealed depositSecret}
+  (14.2, 3.2) -- (14.2, -3.0);
+
+% 3. burn event → operator initiates withdrawal on Bitcoin
+\draw[dashed, cGreen!50, -{Stealth[length=4pt]}, semithick]
+  (ethburn.north) -- (28, 3.5);
+\node[font=\tiny, text=cGreen!60, anchor=west] at (28.2, 1.7)
+  {operator monitors};
+\node[font=\tiny, text=cGreen!60, anchor=west] at (28.2, 1.3)
+  {$\rightarrow$ kickoff + withdraw};
 
 
 
